@@ -1,0 +1,547 @@
+#!/usr/bin/env bash
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Unified test runner for extenddb. All test execution MUST go through this script.
+#
+# Usage:
+#   devtools/run-tests --extenddb --rust
+#   devtools/run-tests --extenddb --rust-integration
+#   devtools/run-tests --extenddb --pytest --external --comprehensive
+#   devtools/run-tests --extenddb --all
+#   devtools/run-tests --real-dynamodb --pytest
+#   devtools/run-tests --extenddb --rust --release
+#   devtools/run-tests --extenddb --filter PATTERN --pytest
+#   devtools/run-tests --extenddb --catalog-check --config PATH
+#
+# Target flag (exactly one required, mutually exclusive):
+#   --extenddb            targeting a local extenddb instance
+#   --real-dynamodb   targeting real AWS DynamoDB
+#
+# Suite flags (at least one required):
+#   --rust            Rust unit tests
+#   --rust-integration Rust integration tests (tests/rust/, requires running server)
+#   --pytest          Python integration tests
+#   --external        External Java test suite
+#   --comprehensive   Comprehensive Python suite
+#   --all             all of the above
+#   --catalog-check   post-test catalog integrity check
+#
+# Options:
+#   --release         use release build for Rust tests
+#   --filter PATTERN  pass to cargo test / pytest -k
+#   --config PATH     config file path (default: extenddb.toml in repo root)
+#
+# REQ-TEST-001, D-1, D-2, D-3, D-4, D-5
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_DIR"
+
+# Never prompt for input — redirect stdin from /dev/null for the entire script.
+# Any command that would block on stdin will get EOF immediately.
+exec < /dev/null
+
+# Ensure discussions directory exists for test artifacts
+mkdir -p discussions
+
+# Current short commit hash
+HASH=$(git rev-parse --short HEAD)
+
+# Target
+TARGET=""
+
+# Suite flags
+RUN_RUST=false
+RUN_RUST_INTEGRATION=false
+RUN_PYTEST=false
+RUN_EXTERNAL=false
+RUN_COMPREHENSIVE=false
+RUN_CATALOG_CHECK=false
+
+# Options
+RELEASE=false
+FILTER=""
+CONFIG_PATH=""
+
+usage() {
+    cat <<'EOF'
+Usage: devtools/run-tests --extenddb|--real-dynamodb SUITES [OPTIONS]
+
+Target (exactly one required):
+  --extenddb            local extenddb instance
+  --real-dynamodb   real AWS DynamoDB
+
+Suites (at least one required):
+  --rust            Rust unit tests
+  --rust-integration Rust integration tests (tests/rust/)
+  --pytest          Python integration tests
+  --external        External Java test suite
+  --comprehensive   Comprehensive Python suite
+  --all             all suites
+  --catalog-check   post-test catalog integrity check
+
+Options:
+  --release         release build for Rust tests
+  --filter PATTERN  filter for cargo test / pytest -k
+  --config PATH     config file path
+EOF
+    exit 1
+}
+
+if [[ $# -eq 0 ]]; then
+    usage
+fi
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --extenddb)           TARGET="extenddb"; shift ;;
+        --real-dynamodb)  TARGET="real-dynamodb"; shift ;;
+        --rust)           RUN_RUST=true; shift ;;
+        --rust-integration) RUN_RUST_INTEGRATION=true; shift ;;
+        --pytest)         RUN_PYTEST=true; shift ;;
+        --external)       RUN_EXTERNAL=true; shift ;;
+        --comprehensive)  RUN_COMPREHENSIVE=true; shift ;;
+        --all)            RUN_RUST=true; RUN_RUST_INTEGRATION=true; RUN_PYTEST=true; RUN_EXTERNAL=true; RUN_COMPREHENSIVE=true; shift ;;
+        --release)        RELEASE=true; shift ;;
+        --filter)         FILTER="$2"; shift 2 ;;
+        --catalog-check)  RUN_CATALOG_CHECK=true; shift ;;
+        --config)         CONFIG_PATH="$2"; shift 2 ;;
+        -h|--help)        usage ;;
+        *)                echo "error: unknown option: $1"; usage ;;
+    esac
+done
+
+# --- Validate: target flag required ---
+if [[ -z "$TARGET" ]]; then
+    echo "error: target flag is required (--extenddb or --real-dynamodb)"
+    exit 1
+fi
+
+# --- Validate: at least one suite ---
+if ! $RUN_RUST && ! $RUN_RUST_INTEGRATION && ! $RUN_PYTEST && ! $RUN_EXTERNAL && ! $RUN_COMPREHENSIVE && ! $RUN_CATALOG_CHECK; then
+    echo "error: at least one suite flag is required (--rust, --rust-integration, --pytest, --external, --comprehensive, --all, --catalog-check)"
+    exit 1
+fi
+
+# --- Credential validation ---
+validate_local_target() {
+    local prefix_upper="$1"  # EXTENDDB
+    local prefix_lower="$2"  # extenddb
+
+    # EXTENDDB_TEST_ENDPOINT must be set
+    if [[ -z "${EXTENDDB_TEST_ENDPOINT:-}" ]]; then
+        echo "error: --${prefix_lower} requires EXTENDDB_TEST_ENDPOINT to be set."
+        echo "  export EXTENDDB_TEST_ENDPOINT=https://localhost:8443"
+        exit 1
+    fi
+
+    # EXTENDDB_TEST_ENDPOINT must point to localhost
+    if [[ ! "$EXTENDDB_TEST_ENDPOINT" =~ ^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?(/.*)?$ ]]; then
+        echo "error: --${prefix_lower} requires EXTENDDB_TEST_ENDPOINT to point to localhost."
+        echo "  Got: $EXTENDDB_TEST_ENDPOINT"
+        echo "  This looks like a remote endpoint. Did you mean --real-dynamodb?"
+        exit 1
+    fi
+
+    # EXTENDDB_ADMIN_PASSWORD must be set
+    if [[ -z "${EXTENDDB_ADMIN_PASSWORD:-}" ]]; then
+        echo "error: --${prefix_lower} requires EXTENDDB_ADMIN_PASSWORD to be set."
+        echo "  This is the password from '${prefix_lower} init'."
+        exit 1
+    fi
+}
+
+validate_real_dynamodb() {
+    # EXTENDDB_TEST_ENDPOINT must NOT be set
+    if [[ -n "${EXTENDDB_TEST_ENDPOINT:-}" ]]; then
+        echo "error: --real-dynamodb requires EXTENDDB_TEST_ENDPOINT to be unset."
+        echo "  Got: $EXTENDDB_TEST_ENDPOINT"
+        echo "  This looks like a local ${TARGET} instance. Did you mean --extenddb?"
+        exit 1
+    fi
+
+    # EXTENDDB_ADMIN_PASSWORD must NOT be set
+    if [[ -n "${EXTENDDB_ADMIN_PASSWORD:-}" ]]; then
+        echo "error: --real-dynamodb requires EXTENDDB_ADMIN_PASSWORD to be unset."
+        echo "  Real DynamoDB has no admin password. Unset EXTENDDB_ADMIN_PASSWORD."
+        exit 1
+    fi
+
+    # AWS_ACCESS_KEY_ID must not look like extenddb keys
+    local aki="${AWS_ACCESS_KEY_ID:-}"
+    if [[ -n "$aki" ]]; then
+        if [[ "$aki" == AKIAEXTENDDB* || "$aki" == ASIAEXTENDDB* ]]; then
+            echo "error: --real-dynamodb requires AWS_ACCESS_KEY_ID to NOT be an extenddb key."
+            echo "  Got: $aki"
+            echo "  This looks like a local key. Did you mean --extenddb?"
+            exit 1
+        fi
+    fi
+}
+
+# Only validate credentials for integration suites
+NEEDS_INTEGRATION=false
+if $RUN_PYTEST || $RUN_EXTERNAL || $RUN_COMPREHENSIVE || $RUN_CATALOG_CHECK || $RUN_RUST_INTEGRATION; then
+    NEEDS_INTEGRATION=true
+fi
+
+if $NEEDS_INTEGRATION; then
+    case "$TARGET" in
+        extenddb) validate_local_target "EXTENDDB" "extenddb" ;;
+        real-dynamodb) validate_real_dynamodb ;;
+    esac
+fi
+
+# --- Echo target info (D3: always, before any tests) ---
+echo "=== Test target: $TARGET ==="
+echo "  commit:              $HASH"
+if [[ "$TARGET" == "real-dynamodb" ]]; then
+    echo "  EXTENDDB_TEST_ENDPOINT = (not set — using AWS SDK defaults)"
+    echo "  AWS_ACCESS_KEY_ID  = ${AWS_ACCESS_KEY_ID:-(from ~/.aws)}"
+else
+    echo "  EXTENDDB_TEST_ENDPOINT = ${EXTENDDB_TEST_ENDPOINT:-}"
+    echo "  AWS_ACCESS_KEY_ID  = ${AWS_ACCESS_KEY_ID:-(will be provisioned)}"
+fi
+echo ""
+
+# --- Health check (local targets only) ---
+health_check() {
+    local endpoint="$1"
+    local timeout=30
+    local interval=1
+    local elapsed=0
+
+    echo "=== Health check: ${endpoint}/health ==="
+    while [[ $elapsed -lt $timeout ]]; do
+        if curl -skf -o /dev/null "${endpoint}/health" 2>/dev/null; then
+            echo "  ✓ Server is healthy (${elapsed}s)"
+            return 0
+        fi
+        sleep "$interval"
+        elapsed=$((elapsed + interval))
+    done
+    echo "  ✗ Server health check failed after ${timeout}s"
+    echo "  Is the server running? Check: curl -sk ${endpoint}/health"
+    return 1
+}
+
+PASS=true
+CLEANUP_TRUSTSTORE=""
+
+# --- Pre-flight for integration suites (local targets) ---
+if $NEEDS_INTEGRATION && [[ "$TARGET" != "real-dynamodb" ]]; then
+    # Health check
+    if ! health_check "$EXTENDDB_TEST_ENDPOINT"; then
+        echo "error: Server is not healthy. Cannot run integration tests."
+        exit 1
+    fi
+
+    # Provision test credentials
+    echo "=== Provisioning test credentials ==="
+    export EXTENDDB_ADMIN_USER="${EXTENDDB_ADMIN_USER:-admin}"
+    CRED_FILE=$(mktemp)
+    if python3 devtools/provision-test-credentials > "$CRED_FILE"; then
+        eval "$(cat "$CRED_FILE")"
+        echo "  ✓ Credentials provisioned: AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID"
+    else
+        echo "  ✗ Credential provisioning failed"
+        cat "$CRED_FILE"
+        rm -f "$CRED_FILE"
+        exit 1
+    fi
+    rm -f "$CRED_FILE"
+
+    # Post-provisioning: validate key prefix matches target
+    local_prefix=""
+    case "$TARGET" in
+        extenddb) local_prefix="EXTENDDB" ;;
+    esac
+    aki="${AWS_ACCESS_KEY_ID:-}"
+    if [[ -n "$local_prefix" && -n "$aki" ]]; then
+        if [[ "$aki" != AKIA${local_prefix}* && "$aki" != ASIA${local_prefix}* ]]; then
+            echo "error: --${TARGET} requires AWS_ACCESS_KEY_ID to start with AKIA${local_prefix} or ASIA${local_prefix}."
+            echo "  Got: $aki"
+            echo "  Credential provisioning returned unexpected key format."
+            exit 1
+        fi
+    fi
+
+    # Java truststore for HTTPS
+    if [[ "$EXTENDDB_TEST_ENDPOINT" == https://* ]]; then
+        CERT_PATH="$HOME/.${TARGET}/tls/cert.pem"
+        if [[ -f "$CERT_PATH" ]] && command -v keytool >/dev/null 2>&1; then
+            TRUSTSTORE=$(mktemp -u --suffix=.jks)
+            keytool -importcert -noprompt -alias "$TARGET" -file "$CERT_PATH" \
+                -keystore "$TRUSTSTORE" -storepass changeit 2>/dev/null
+            export JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=$TRUSTSTORE -Djavax.net.ssl.trustStorePassword=changeit"
+            echo "  ✓ Java truststore created: $TRUSTSTORE"
+            CLEANUP_TRUSTSTORE="$TRUSTSTORE"
+        fi
+    fi
+
+    # Runtime settings
+    BINARY="target/release/$TARGET"
+    if [[ ! -x "$BINARY" ]]; then
+        BINARY="target/debug/$TARGET"
+    fi
+    CONFIG_FOR_SETTINGS="${CONFIG_PATH:-${TARGET}.toml}"
+    if [[ -x "$BINARY" && -f "$CONFIG_FOR_SETTINGS" ]]; then
+        if "$BINARY" settings --config "$CONFIG_FOR_SETTINGS" set control_plane_delay_seconds 0.05 2>/dev/null; then
+            echo "  ✓ control_plane_delay_seconds set to 0.05"
+        fi
+        if "$BINARY" settings --config "$CONFIG_FOR_SETTINGS" set gsi_propagation_delay_ms 0 2>/dev/null; then
+            echo "  ✓ gsi_propagation_delay_ms set to 0"
+        fi
+        if "$BINARY" settings --config "$CONFIG_FOR_SETTINGS" set throttling_enabled true 2>/dev/null; then
+            echo "  ✓ throttling_enabled set to true"
+        fi
+    fi
+
+    # Import/export paths
+    if [[ -f "$CONFIG_FOR_SETTINGS" ]]; then
+        NEED_RESTART=false
+        if ! grep -qE '^\[import\]' "$CONFIG_FOR_SETTINGS" || \
+           ! grep -A1 '^\[import\]' "$CONFIG_FOR_SETTINGS" | grep -q '/tmp'; then
+            sed -i '/^# \[import\]/d; /^# paths = \[\].*import/d' "$CONFIG_FOR_SETTINGS"
+            printf '\n[import]\npaths = ["/tmp"]\n' >> "$CONFIG_FOR_SETTINGS"
+            NEED_RESTART=true
+            echo "  ✓ [import] paths configured for /tmp"
+        fi
+        if ! grep -qE '^\[export\]' "$CONFIG_FOR_SETTINGS" || \
+           ! grep -A1 '^\[export\]' "$CONFIG_FOR_SETTINGS" | grep -q '/tmp'; then
+            sed -i '/^# \[export\]/d; /^# paths = \[\].*export/d' "$CONFIG_FOR_SETTINGS"
+            printf '\n[export]\npaths = ["/tmp"]\n' >> "$CONFIG_FOR_SETTINGS"
+            NEED_RESTART=true
+            echo "  ✓ [export] paths configured for /tmp"
+        fi
+        if $NEED_RESTART && [[ -x "$BINARY" ]]; then
+            echo "  Restarting server to pick up import/export config..."
+            "$BINARY" stop --config "$CONFIG_FOR_SETTINGS" 2>/dev/null || true
+            sleep 1
+            "$BINARY" serve --config "$CONFIG_FOR_SETTINGS" 2>/dev/null
+            sleep 2
+            if health_check "$EXTENDDB_TEST_ENDPOINT"; then
+                echo "  ✓ Server restarted with import/export enabled"
+            else
+                echo "  ✗ Server failed to restart after config change"
+                exit 1
+            fi
+        fi
+    fi
+
+    # Export PG connection string for CLI lifecycle tests.
+    # Extract from config, strip the database name to get the base URL.
+    if [[ -z "${EXTENDDB_TEST_PG_CONNECTION_STRING:-}" && -f "$CONFIG_FOR_SETTINGS" ]]; then
+        FULL_CONN=$(grep -oP 'connection_string\s*=\s*"\K[^"]+' "$CONFIG_FOR_SETTINGS" || true)
+        if [[ -n "$FULL_CONN" ]]; then
+            # Strip trailing /database_name to get base URL
+            export EXTENDDB_TEST_PG_CONNECTION_STRING="${FULL_CONN%/*}"
+            echo "  ✓ EXTENDDB_TEST_PG_CONNECTION_STRING=${EXTENDDB_TEST_PG_CONNECTION_STRING}"
+        fi
+    fi
+    echo ""
+fi
+
+# --- Rust tests ---
+if $RUN_RUST; then
+    if $RELEASE; then
+        OUTFILE="discussions/test-rust-release-${HASH}.txt"
+        echo "=== Rust tests (release) → ${OUTFILE} ==="
+        CARGO_ARGS=(cargo test --release)
+    else
+        OUTFILE="discussions/test-rust-${HASH}.txt"
+        echo "=== Rust tests (debug) → ${OUTFILE} ==="
+        CARGO_ARGS=(cargo test)
+    fi
+    if [[ -n "$FILTER" ]]; then
+        CARGO_ARGS+=(-- "$FILTER")
+    fi
+    if "${CARGO_ARGS[@]}" 2>&1 | tee "$OUTFILE"; then
+        echo "  ✓ Rust tests passed"
+    else
+        echo "  ✗ Rust tests failed"
+        PASS=false
+    fi
+    echo ""
+fi
+
+# --- Rust integration tests (tests/rust/) ---
+if $RUN_RUST_INTEGRATION; then
+    OUTFILE="discussions/test-rust-integration-${HASH}.txt"
+    echo "=== Rust integration tests → ${OUTFILE} ==="
+    # Set CA cert for TLS verification against self-signed certs
+    if [[ "$TARGET" != "real-dynamodb" && "${EXTENDDB_TEST_ENDPOINT:-}" == https://* ]]; then
+        CERT_PATH="$HOME/.${TARGET}/tls/cert.pem"
+        if [[ -f "$CERT_PATH" ]]; then
+            export EXTENDDB_CA_CERT="$CERT_PATH"
+        fi
+    fi
+    CARGO_ARGS=(cargo test --manifest-path tests/rust/Cargo.toml)
+    if $RELEASE; then
+        CARGO_ARGS+=(--release)
+    fi
+    # Integration tests share a single Client whose HTTP/2 connection pool
+    # is tied to the creating tokio runtime. Parallel #[tokio::test] runtimes
+    # cause DispatchGone cascading failures. Force sequential execution.
+    CARGO_ARGS+=(--)
+    CARGO_ARGS+=(--test-threads=1)
+    if [[ -n "$FILTER" ]]; then
+        CARGO_ARGS+=("$FILTER")
+    fi
+    if "${CARGO_ARGS[@]}" 2>&1 | tee "$OUTFILE"; then
+        echo "  ✓ Rust integration tests passed"
+    else
+        echo "  ✗ Rust integration tests failed"
+        PASS=false
+    fi
+    echo ""
+fi
+
+# --- Pytest ---
+if $RUN_PYTEST; then
+    OUTFILE="discussions/test-pytest-${HASH}.txt"
+    echo "=== Pytest → ${OUTFILE} ==="
+    if [[ "$TARGET" == "real-dynamodb" ]]; then
+        echo "  target: real DynamoDB (AWS SDK defaults)"
+    else
+        echo "  endpoint: $EXTENDDB_TEST_ENDPOINT"
+    fi
+    echo "  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}"
+    # CLI lifecycle tests manage their own server; exclude from main suite
+    PYTEST_ARGS=(python3 -m pytest tests/ -v --ignore=tests/python --ignore=tests/test_cli_lifecycle.py)
+    if [[ -n "$FILTER" ]]; then
+        PYTEST_ARGS+=(-k "$FILTER")
+    fi
+    if "${PYTEST_ARGS[@]}" 2>&1 | tee "$OUTFILE"; then
+        echo "  ✓ Pytest passed"
+    else
+        echo "  ✗ Pytest failed (check output for details)"
+    fi
+    echo ""
+fi
+
+# --- External tests ---
+if $RUN_EXTERNAL; then
+    OUTFILE="discussions/test-external-${HASH}.txt"
+    JSONFILE="discussions/test-external-${HASH}.json"
+    echo "=== External tests → ${OUTFILE} ==="
+    if [[ "$TARGET" == "real-dynamodb" ]]; then
+        echo "  target: real DynamoDB (AWS SDK defaults)"
+        # External tests use EXTENDDB_ENDPOINT; for real DDB, leave it unset
+        # so the Java SDK uses default endpoint resolution.
+        unset EXTENDDB_ENDPOINT 2>/dev/null || true
+        if devtools/run-external-tests --verbose --report "$JSONFILE" 2>&1 | tee "$OUTFILE"; then
+            echo "  ✓ External tests passed"
+        else
+            echo "  ✗ External tests had failures (check output for details)"
+        fi
+    else
+        export EXTENDDB_ENDPOINT="${EXTENDDB_TEST_ENDPOINT}"
+        echo "  endpoint: $EXTENDDB_ENDPOINT"
+        if devtools/run-external-tests --verbose --endpoint "$EXTENDDB_TEST_ENDPOINT" --report "$JSONFILE" 2>&1 | tee "$OUTFILE"; then
+            echo "  ✓ External tests passed"
+        else
+            echo "  ✗ External tests had failures (check output for details)"
+        fi
+    fi
+    echo ""
+fi
+
+# --- Comprehensive tests ---
+if $RUN_COMPREHENSIVE; then
+    OUTFILE="discussions/test-comprehensive-${HASH}.txt"
+    echo "=== Comprehensive tests (Python) → ${OUTFILE} ==="
+    if [[ "$TARGET" == "real-dynamodb" ]]; then
+        echo "  target: real DynamoDB (AWS SDK defaults)"
+        unset DYNAMODB_ENDPOINT 2>/dev/null || true
+        unset EXTENDDB_CA_CERT 2>/dev/null || true
+        # Set validation mode so extenddb-only tests are skipped against real DDB
+        export EXTENDDB_VALIDATION_MODE=true
+    else
+        export DYNAMODB_ENDPOINT="${EXTENDDB_TEST_ENDPOINT}"
+        echo "  endpoint: $DYNAMODB_ENDPOINT"
+        if [[ "$EXTENDDB_TEST_ENDPOINT" == https://* ]]; then
+            CERT_PATH="$HOME/.${TARGET}/tls/cert.pem"
+            if [[ -f "$CERT_PATH" ]]; then
+                export EXTENDDB_CA_CERT="$CERT_PATH"
+            fi
+        fi
+    fi
+    COMP_ARGS=(python3 -m pytest tests/python/ -v --tb=short)
+    if [[ -n "$FILTER" ]]; then
+        COMP_ARGS+=(-k "$FILTER")
+    fi
+    if "${COMP_ARGS[@]}" 2>&1 | tee "$OUTFILE"; then
+        echo "  ✓ Comprehensive tests passed"
+    else
+        echo "  ✗ Comprehensive tests had failures (check output for details)"
+    fi
+    echo ""
+fi
+
+# --- CLI lifecycle tests (run last — they start/stop their own servers) ---
+if $RUN_PYTEST && [[ "$TARGET" != "real-dynamodb" && -n "${EXTENDDB_TEST_PG_CONNECTION_STRING:-}" ]]; then
+    CLI_OUTFILE="discussions/test-cli-${HASH}.txt"
+    echo "=== CLI lifecycle tests → ${CLI_OUTFILE} ==="
+    CLI_ARGS=(python3 -m pytest tests/test_cli_lifecycle.py -v)
+    if [[ -n "$FILTER" ]]; then
+        CLI_ARGS+=(-k "$FILTER")
+    fi
+    if "${CLI_ARGS[@]}" 2>&1 | tee "$CLI_OUTFILE"; then
+        echo "  ✓ CLI lifecycle tests passed"
+    else
+        echo "  ✗ CLI lifecycle tests failed"
+    fi
+    echo ""
+fi
+
+# --- Catalog check ---
+if $RUN_CATALOG_CHECK; then
+    if [[ "$TARGET" == "real-dynamodb" ]]; then
+        echo "=== Catalog check: skipped (not applicable for real DynamoDB) ==="
+    else
+        BINARY="target/release/$TARGET"
+        if [[ ! -x "$BINARY" ]]; then
+            BINARY="target/debug/$TARGET"
+        fi
+        if [[ ! -x "$BINARY" ]]; then
+            echo "error: $TARGET binary not found. Build with: cargo build --release"
+            exit 1
+        fi
+        CHECK_CONFIG="${CONFIG_PATH:-${TARGET}.toml}"
+        if [[ ! -f "$CHECK_CONFIG" ]]; then
+            echo "error: config file not found: $CHECK_CONFIG"
+            exit 1
+        fi
+        echo "=== Catalog check (post-test integrity gate) ==="
+        echo "  binary: $BINARY"
+        echo "  config: $CHECK_CONFIG"
+        if "$BINARY" catalog-check --config "$CHECK_CONFIG"; then
+            echo "  ✓ Catalog check passed"
+        else
+            echo "  ✗ Catalog check FAILED — catalog inconsistencies detected"
+            PASS=false
+        fi
+    fi
+    echo ""
+fi
+
+# --- Test table cleanup (runs after integration suites, pass or fail) ---
+if $NEEDS_INTEGRATION; then
+    echo "=== Post-test table cleanup ==="
+    python3 "$SCRIPT_DIR/cleanup-test-tables" || echo "  ⚠ cleanup script returned non-zero (non-fatal)"
+    echo ""
+fi
+
+# --- Cleanup ---
+[[ -n "$CLEANUP_TRUSTSTORE" && -f "$CLEANUP_TRUSTSTORE" ]] && rm -f "$CLEANUP_TRUSTSTORE"
+
+if $PASS; then
+    echo "=== All requested test suites completed ==="
+else
+    echo "=== Some test suites FAILED ==="
+    exit 1
+fi

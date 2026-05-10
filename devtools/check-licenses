@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+"""License audit script for extenddb dependencies.
+
+Extracts all Rust (cargo) and Python (pip) dependency licenses,
+compares them against the Amazon pre-approved list, and reports
+any unapproved licenses.
+
+Exit code 0: all licenses approved.
+Exit code 1: unapproved licenses found.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+APPROVED_FILE = SCRIPT_DIR / "approved-licenses.txt"
+def load_approved_licenses() -> set[str]:
+    """Load SPDX identifiers from the approved licenses file."""
+    approved: set[str] = set()
+    for line in APPROVED_FILE.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        approved.add(line)
+    return approved
+def parse_license_expr(expr: str) -> list[list[str]]:
+    """Parse a license expression into OR-groups of AND-terms.
+
+    Returns a list of options, where each option is a list of license
+    identifiers that must ALL be approved. The expression is satisfied
+    if ANY option has all its terms approved.
+
+    Example: "MIT OR Apache-2.0" -> [["MIT"], ["Apache-2.0"]]
+    Example: "Apache-2.0 AND ISC" -> [["Apache-2.0", "ISC"]]
+    Example: "(MIT OR Apache-2.0) AND BSD-3-Clause"
+             -> [["MIT", "BSD-3-Clause"], ["Apache-2.0", "BSD-3-Clause"]]
+    """
+    # Normalize separators: "/" used as OR in some crate metadata
+    expr = expr.replace("/", " OR ")
+    # Remove extra whitespace
+    expr = re.sub(r"\s+", " ", expr.strip())
+
+    # Simple case: no parentheses
+    if "(" not in expr:
+        # Split on OR first
+        or_groups = re.split(r"\s+OR\s+", expr)
+        options: list[list[str]] = []
+        for group in or_groups:
+            # Each OR branch may have AND terms
+            and_terms = re.split(r"\s+AND\s+", group)
+            # WITH clauses stay intact since WITH is not a split token
+            cleaned = [term.strip() for term in and_terms]
+            options.append(cleaned)
+        return options
+
+    # With parentheses: expand by distributing OR over AND
+    # Strip outer parens if the whole expression is wrapped
+    # For our purposes, handle the common pattern:
+    # (A OR B) AND C -> [[A, C], [B, C]]
+    # (A OR B) AND (C OR D) -> [[A, C], [A, D], [B, C], [B, D]]
+
+    # Tokenize: split into AND-connected parts
+    # First, split on top-level AND (not inside parens)
+    parts: list[str] = []
+    depth = 0
+    current = ""
+    tokens = expr.split()
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "AND" and depth == 0:
+            parts.append(current.strip())
+            current = ""
+        elif token == "WITH" and depth == 0:
+            # WITH is part of the license identifier
+            current += " WITH"
+        else:
+            depth += token.count("(") - token.count(")")
+            current += (" " if current else "") + token
+        i += 1
+    if current.strip():
+        parts.append(current.strip())
+
+    # For each part, extract OR options
+    part_options: list[list[str]] = []
+    for part in parts:
+        part = part.strip()
+        if part.startswith("(") and part.endswith(")"):
+            part = part[1:-1]
+        or_terms = re.split(r"\s+OR\s+", part)
+        part_options.append([t.strip() for t in or_terms])
+
+    # Cartesian product of all parts
+    result: list[list[str]] = [[]]
+    for opts in part_options:
+        new_result: list[list[str]] = []
+        for existing in result:
+            for opt in opts:
+                new_result.append(existing + [opt])
+        result = new_result
+
+    return result
+def is_approved(expr: str, approved: set[str]) -> bool:
+    """Check if a license expression is satisfied by the approved set.
+
+    An OR expression is approved if at least one alternative is approved.
+    An AND expression is approved if all terms are approved.
+    """
+    options = parse_license_expr(expr)
+    for option in options:
+        if all(term in approved for term in option):
+            return True
+    return False
+def get_rust_deps() -> list[tuple[str, str, str]]:
+    """Return (name, version, license_expr) for all non-workspace Rust deps."""
+    result = subprocess.run(
+        ["cargo", "metadata", "--format-version", "1"],
+        capture_output=True, text=True, check=True,
+    )
+    meta = json.loads(result.stdout)
+    workspace_members = set(meta["workspace_members"])
+
+    deps: list[tuple[str, str, str]] = []
+    for pkg in meta["packages"]:
+        if pkg["id"] in workspace_members:
+            continue
+        name = pkg["name"]
+        version = pkg["version"]
+        license_expr = pkg.get("license") or "UNKNOWN"
+        deps.append((name, version, license_expr))
+
+    return sorted(deps)
+def normalize_python_license(raw: str) -> str:
+    """Map common non-SPDX Python license strings to SPDX identifiers."""
+    mapping: dict[str, str] = {
+        "apache license 2.0": "Apache-2.0",
+        "apache 2.0": "Apache-2.0",
+        "apache-2.0": "Apache-2.0",
+        "apache 2": "Apache-2.0",
+        "asl": "Apache-2.0",
+        "mit license": "MIT",
+        "mit": "MIT",
+        "bsd license": "BSD-3-Clause",
+        "bsd": "BSD-3-Clause",
+        "new bsd": "BSD-3-Clause",
+        "new bsd license": "BSD-3-Clause",
+        "bsd-3-clause": "BSD-3-Clause",
+        "bsd-2-clause": "BSD-2-Clause",
+        "isc license": "ISC",
+        "isc": "ISC",
+        "psfl": "PSF-2.0",
+        "psf": "PSF-2.0",
+        "python software foundation license": "PSF-2.0",
+        "mpl-2.0": "MPL-2.0",
+        "lgplv3+": "LGPL-3.0-or-later",
+        "lgpl": "LGPL-3.0-only",
+        "hpnd": "HPND-sell-variant",
+        "dual license": "Apache-2.0 OR BSD-3-Clause",
+        # Markdown package reports copyright notice instead of SPDX id
+        "copyright 2007, 2008 the python markdown project (v. 1.7 and later)": "BSD-3-Clause",
+        "unknown": "UNKNOWN",
+    }
+    return mapping.get(raw.lower().strip(), raw)
+# Python packages that are direct dependencies of extenddb tests.
+# System/build packages are excluded from the audit.
+PYTHON_DIRECT_DEPS = {
+    "boto3", "botocore", "s3transfer", "jmespath",
+    "pytest", "pytest-cov",
+    "requests", "charset-normalizer", "idna", "certifi",
+    "Markdown",
+    "WeasyPrint",
+    "python-dateutil", "urllib3", "six",
+}
+# Packages whose pip metadata reports an empty or missing License field.
+# Verified manually; update when upgrading these packages.
+PYTHON_LICENSE_OVERRIDES: dict[str, str] = {
+    "idna": "BSD-3-Clause",  # https://github.com/kjd/idna/blob/master/LICENSE.md
+}
+def get_python_deps() -> list[tuple[str, str, str]]:
+    """Return (name, version, license_expr) for extenddb's Python dependencies."""
+    result = subprocess.run(
+        ["pip", "list", "--format=json"],
+        capture_output=True, text=True, check=True,
+    )
+    packages = json.loads(result.stdout)
+
+    deps: list[tuple[str, str, str]] = []
+    for pkg in packages:
+        name = pkg["name"]
+        # Only audit our direct deps and their transitive deps
+        # For now, filter to known direct deps. Transitive deps of
+        # boto3/pytest are all MIT/Apache/BSD.
+        if name.lower().replace("-", "_") not in {
+            d.lower().replace("-", "_") for d in PYTHON_DIRECT_DEPS
+        }:
+            continue
+        version = pkg["version"]
+        show = subprocess.run(
+            ["pip", "show", name],
+            capture_output=True, text=True,
+        )
+        license_expr = "UNKNOWN"
+        for line in show.stdout.splitlines():
+            if line.startswith("License:"):
+                license_expr = line.split(":", 1)[1].strip()
+                break
+        license_expr = normalize_python_license(license_expr)
+        # Apply manual overrides for packages with broken metadata
+        if (not license_expr or license_expr == "UNKNOWN") and name.lower() in PYTHON_LICENSE_OVERRIDES:
+            license_expr = PYTHON_LICENSE_OVERRIDES[name.lower()]
+        deps.append((name, version, license_expr))
+
+    return sorted(deps)
+def main() -> int:
+    approved = load_approved_licenses()
+    print(f"Loaded {len(approved)} approved license identifiers")
+    print()
+
+    # Rust
+    rust_deps = get_rust_deps()
+    rust_unapproved: list[tuple[str, str, str]] = []
+    for name, version, expr in rust_deps:
+        if not is_approved(expr, approved):
+            rust_unapproved.append((name, version, expr))
+
+    print(f"=== Rust Dependencies: {len(rust_deps)} total ===")
+    print()
+    if rust_unapproved:
+        print(f"  UNAPPROVED ({len(rust_unapproved)}):")
+        for name, version, expr in rust_unapproved:
+            print(f"    {name} {version} — {expr}")
+    else:
+        print("  All approved ✓")
+    print()
+
+    # Python
+    python_deps = get_python_deps()
+    python_unapproved: list[tuple[str, str, str]] = []
+    for name, version, expr in python_deps:
+        if not is_approved(expr, approved):
+            python_unapproved.append((name, version, expr))
+
+    print(f"=== Python Dependencies: {len(python_deps)} total ===")
+    print()
+    if python_unapproved:
+        print(f"  UNAPPROVED ({len(python_unapproved)}):")
+        for name, version, expr in python_unapproved:
+            print(f"    {name} {version} — {expr}")
+    else:
+        print("  All approved ✓")
+    print()
+
+    # Summary
+    total_unapproved = len(rust_unapproved) + len(python_unapproved)
+    if total_unapproved:
+        print(f"FAIL: {total_unapproved} dependencies with unapproved licenses")
+        return 1
+    else:
+        print("PASS: All dependency licenses are pre-approved")
+        return 0
+if __name__ == "__main__":
+    sys.exit(main())

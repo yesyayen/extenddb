@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+# Run code coverage for Rust unit tests and Python integration tests.
+#
+# Usage:
+#   devtools/run-coverage              # Rust unit tests only
+#   devtools/run-coverage --python     # Also run Python integration tests (requires running extenddb)
+#
+# Rust coverage uses cargo-llvm-cov. Python coverage uses pytest-cov.
+# Both tools must be installed (cargo install cargo-llvm-cov; pip install pytest-cov).
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_DIR"
+
+echo "=== Rust unit test coverage (cargo-llvm-cov) ==="
+cargo llvm-cov --summary-only 2>&1 | tail -1
+echo ""
+echo "For detailed report: cargo llvm-cov --html  (opens target/llvm-cov/html/index.html)"
+
+if [[ "${1:-}" == "--python" ]]; then
+    echo ""
+    echo "=== Python integration test coverage (pytest-cov) ==="
+    if [[ -z "${EXTENDDB_TEST_ENDPOINT:-}" ]]; then
+        echo "ERROR: EXTENDDB_TEST_ENDPOINT not set. Start extenddb first."
+        exit 1
+    fi
+    # Measures test file execution coverage (not product code — product is Rust).
+    python -m pytest tests/ \
+        --cov=tests \
+        --cov-report=term-missing \
+        --cov-report=html:target/python-cov \
+        -x -q 2>&1 | tail -20
+    echo ""
+    echo "HTML report: target/python-cov/index.html"
+fi

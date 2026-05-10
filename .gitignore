@@ -1,0 +1,9 @@
+/target
+extenddb.toml
+__pycache__/
+.coverage
+dist/
+.venv/
+pdfs/
+docs/rendered/
+discussions/

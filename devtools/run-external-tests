@@ -1,0 +1,509 @@
+#!/usr/bin/env python3
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+"""External test suite runner for extenddb.
+
+Runs external test suites against a running extenddb instance. Suites are
+registered in external-suites.toml and referenced by path — never copied.
+
+Usage:
+    devtools/run-external-tests [OPTIONS]
+
+Options:
+    --config PATH       Path to suite registry (default: external-suites.toml)
+    --suite NAME        Run only the named suite (can be repeated)
+    --endpoint URL      extenddb endpoint URL (default: $EXTENDDB_ENDPOINT or http://localhost:8000)
+    --dry-run           Show what would run without executing
+    --report PATH       Write JSON report to PATH
+    --verbose           Show full test output (default: summary only)
+
+REQ-TEST-001
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+@dataclass
+class SuiteConfig:
+    """Parsed configuration for one external test suite."""
+
+    name: str
+    path: Path
+    runner: str
+    enabled: bool = True
+    env: dict[str, str] = field(default_factory=dict)
+    args: list[str] = field(default_factory=list)
+@dataclass
+class SuiteResult:
+    """Result of running one external test suite."""
+
+    name: str
+    status: str  # "passed", "failed", "skipped", "error"
+    tests_run: int = 0
+    tests_passed: int = 0
+    tests_failed: int = 0
+    tests_errored: int = 0
+    tests_skipped: int = 0
+    duration_secs: float = 0.0
+    message: str = ""
+    output: str = ""
+def parse_toml_simple(path: Path) -> list[dict[str, Any]]:
+    """Parse the suite registry TOML file.
+
+    Uses tomllib (Python 3.11+) when available, falling back to a minimal
+    hand-rolled parser for Python 3.9/3.10 compatibility. The fallback
+    handles [[suite]] arrays with string, bool, and [suite.env] sub-tables.
+    """
+    try:
+        import tomllib  # noqa: PLC0415
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+        suites = data.get("suite", [])
+        # Normalize: ensure each suite has 'env', 'args', 'enabled' defaults.
+        for s in suites:
+            s.setdefault("env", {})
+            s.setdefault("args", [])
+            s.setdefault("enabled", True)
+        return suites
+    except ModuleNotFoundError:
+        pass
+
+    # Fallback: minimal parser for Python < 3.11.
+    suites: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    in_env = False
+
+    for line in path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        if stripped == "[[suite]]":
+            if current is not None:
+                suites.append(current)
+            current = {"env": {}, "args": [], "enabled": True}
+            in_env = False
+            continue
+
+        if stripped == "[suite.env]":
+            in_env = True
+            continue
+
+        if stripped.startswith("["):
+            in_env = False
+            continue
+
+        if current is None:
+            continue
+
+        if "=" not in stripped:
+            continue
+
+        key, _, value = stripped.partition("=")
+        key = key.strip()
+        value = value.strip()
+
+        # Strip quotes
+        if (value.startswith('"') and value.endswith('"')) or (
+            value.startswith("'") and value.endswith("'")
+        ):
+            value = value[1:-1]
+        else:
+            # Strip inline comments from unquoted values
+            if "#" in value:
+                value = value[:value.index("#")].strip()
+
+        # Handle booleans
+        if value.lower() == "true":
+            parsed_value: Any = True
+        elif value.lower() == "false":
+            parsed_value = False
+        else:
+            parsed_value = value
+
+        if in_env:
+            current["env"][key] = str(parsed_value)
+        else:
+            current[key] = parsed_value
+
+    if current is not None:
+        suites.append(current)
+
+    return suites
+def load_suites(config_path: Path) -> list[SuiteConfig]:
+    """Load suite configurations from the registry file."""
+    if not config_path.exists():
+        print(f"error: config file not found: {config_path}", file=sys.stderr)
+        sys.exit(1)
+
+    raw = parse_toml_simple(config_path)
+    suites = []
+    for entry in raw:
+        name = entry.get("name", "unnamed")
+        path_str = entry.get("path", "")
+        path = Path(os.path.expanduser(path_str))
+        runner = entry.get("runner", "unknown")
+        enabled = entry.get("enabled", True)
+        env = entry.get("env", {})
+        args = entry.get("args", [])
+        if isinstance(args, str):
+            args = args.split()
+        suites.append(SuiteConfig(
+            name=name, path=path, runner=runner, enabled=enabled,
+            env=env, args=args,
+        ))
+    return suites
+RUNNER_PREREQS: dict[str, list[tuple[str, list[str]]]] = {
+    "maven": [("java", ["java", "--version"]), ("mvn", ["mvn", "--version"])],
+    "gradle": [("java", ["java", "--version"]), ("gradle", ["gradle", "--version"])],
+    "pytest": [("python3", ["python3", "--version"]), ("pytest", ["python3", "-m", "pytest", "--version"])],
+    "cargo": [("cargo", ["cargo", "--version"])],
+}
+def check_prereqs(runner: str) -> list[str]:
+    """Check that prerequisites for a runner are available. Return missing ones."""
+    missing = []
+    for name, cmd in RUNNER_PREREQS.get(runner, []):
+        if shutil.which(cmd[0]) is None:
+            missing.append(name)
+            continue
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=10, check=False)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            missing.append(name)
+    return missing
+def build_command(suite: SuiteConfig) -> list[str]:
+    """Build the shell command to run a test suite."""
+    if suite.runner == "maven":
+        cmd = ["mvn", "test", "-B", "-q"]
+    elif suite.runner == "gradle":
+        cmd = ["gradle", "test", "--no-daemon", "-q"]
+    elif suite.runner == "pytest":
+        cmd = ["python3", "-m", "pytest", "-v"]
+    elif suite.runner == "cargo":
+        cmd = ["cargo", "test"]
+    else:
+        cmd = [suite.runner]
+    cmd.extend(suite.args)
+    return cmd
+def parse_surefire_xml(suite_path: Path) -> dict[str, int]:
+    """Parse surefire XML reports as fallback when mvn -q suppresses stdout.
+
+    Returns aggregated counts from all TEST-*.xml files in target/surefire-reports/.
+    """
+    import xml.etree.ElementTree as ET  # noqa: PLC0415
+
+    counts = {"run": 0, "passed": 0, "failed": 0, "errored": 0, "skipped": 0}
+    reports_dir = suite_path / "target" / "surefire-reports"
+    if not reports_dir.is_dir():
+        return counts
+    for xml_file in sorted(reports_dir.glob("TEST-*.xml")):
+        try:
+            tree = ET.parse(xml_file)
+            root = tree.getroot()
+            counts["run"] += int(root.get("tests", 0))
+            counts["failed"] += int(root.get("failures", 0))
+            counts["errored"] += int(root.get("errors", 0))
+            counts["skipped"] += int(root.get("skipped", 0))
+        except (ET.ParseError, ValueError):
+            continue
+    counts["passed"] = counts["run"] - counts["failed"] - counts["errored"] - counts["skipped"]
+    return counts
+
+
+def parse_maven_output(output: str, suite_path: Path | None = None) -> dict[str, int]:
+    """Extract test counts from Maven surefire output.
+
+    Maven prints per-class "Tests run:" lines (with "Time elapsed" and "-- in")
+    and a final summary line without those markers. We use the last matching line.
+    The line may be prefixed with "[ERROR] " or "[INFO] ".
+
+    When mvn -q suppresses the summary line, falls back to parsing surefire
+    XML reports from target/surefire-reports/.
+    """
+    counts = {"run": 0, "passed": 0, "failed": 0, "errored": 0, "skipped": 0}
+    for line in reversed(output.splitlines()):
+        if "Tests run:" in line and "Failures:" in line:
+            # Strip Maven log prefix like "[ERROR] " or "[INFO] "
+            cleaned = line
+            if "] " in cleaned:
+                cleaned = cleaned[cleaned.index("] ") + 2:]
+            parts = cleaned.split(",")
+            for part in parts:
+                part = part.strip()
+                if part.startswith("Tests run:"):
+                    counts["run"] = int(part.split(":")[1].strip())
+                elif part.startswith("Failures:"):
+                    counts["failed"] = int(part.split(":")[1].strip())
+                elif part.startswith("Errors:"):
+                    counts["errored"] = int(part.split(":")[1].strip())
+                elif part.startswith("Skipped:"):
+                    val = part.split(":")[1].strip().split()[0]
+                    counts["skipped"] = int(val)
+            counts["passed"] = counts["run"] - counts["failed"] - counts["errored"] - counts["skipped"]
+            break
+
+    # Fallback: mvn -q suppresses the summary line when all tests pass.
+    # Parse surefire XML reports instead.
+    if counts["run"] == 0 and suite_path is not None:
+        xml_counts = parse_surefire_xml(suite_path)
+        if xml_counts["run"] > 0:
+            xml_counts["message"] = "counts from surefire XML (mvn -q suppressed stdout summary)"
+            return xml_counts
+
+    return counts
+def parse_pytest_output(output: str) -> dict[str, int]:
+    """Extract test counts from pytest output."""
+    counts = {"run": 0, "passed": 0, "failed": 0, "errored": 0, "skipped": 0}
+    for line in reversed(output.splitlines()):
+        # pytest summary: "5 passed, 2 failed, 1 error in 3.45s"
+        if " passed" in line or " failed" in line or " error" in line:
+            for word_pair in line.split(","):
+                word_pair = word_pair.strip()
+                parts = word_pair.split()
+                if len(parts) >= 2:
+                    try:
+                        count = int(parts[0])
+                    except ValueError:
+                        continue
+                    label = parts[1].rstrip("s").lower()
+                    if label == "passed":
+                        counts["passed"] = count
+                    elif label == "failed":
+                        counts["failed"] = count
+                    elif label == "error":
+                        counts["errored"] = count
+                    elif label == "skipped":
+                        counts["skipped"] = count
+            counts["run"] = counts["passed"] + counts["failed"] + counts["errored"]
+            break
+    return counts
+def run_suite(suite: SuiteConfig, endpoint: str, verbose: bool) -> SuiteResult:
+    """Run a single external test suite and return the result."""
+    if not suite.enabled:
+        return SuiteResult(name=suite.name, status="skipped", message="disabled in config")
+
+    if not suite.path.exists():
+        return SuiteResult(
+            name=suite.name, status="skipped",
+            message=f"suite directory not found: {suite.path}",
+        )
+
+    missing = check_prereqs(suite.runner)
+    if missing:
+        return SuiteResult(
+            name=suite.name, status="skipped",
+            message=f"missing prerequisites: {', '.join(missing)}",
+        )
+
+    # Build environment: inherit current env, add suite-specific vars
+    env = os.environ.copy()
+    for key, value in suite.env.items():
+        # Substitute ${EXTENDDB_ENDPOINT} with the actual endpoint
+        resolved = value.replace("${EXTENDDB_ENDPOINT}", endpoint)
+        env[key] = resolved
+
+    cmd = build_command(suite)
+
+    if verbose:
+        print(f"  command: {' '.join(cmd)}")
+        print(f"  cwd: {suite.path}")
+        print(f"  env overrides: {suite.env}")
+
+    start = time.monotonic()
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=suite.path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=1800,  # 30 minute timeout per suite
+        )
+    except subprocess.TimeoutExpired:
+        return SuiteResult(
+            name=suite.name, status="error", duration_secs=600.0,
+            message="timed out after 600 seconds",
+        )
+    duration = time.monotonic() - start
+
+    output = proc.stdout + "\n" + proc.stderr
+
+    # Parse results based on runner type
+    if suite.runner == "maven":
+        counts = parse_maven_output(output, suite_path=suite.path)
+    elif suite.runner == "pytest":
+        counts = parse_pytest_output(output)
+    else:
+        counts = {"run": 0, "passed": 0, "failed": 0, "errored": 0, "skipped": 0}
+
+    status = "passed" if proc.returncode == 0 else "failed"
+    msg = counts.pop("message", "")
+    if not msg and status != "passed":
+        msg = f"exit code {proc.returncode}"
+
+    return SuiteResult(
+        name=suite.name,
+        status=status,
+        tests_run=counts["run"],
+        tests_passed=counts["passed"],
+        tests_failed=counts["failed"],
+        tests_errored=counts["errored"],
+        tests_skipped=counts["skipped"],
+        duration_secs=round(duration, 2),
+        message=msg,
+        output=output if verbose else "",
+    )
+def print_summary(results: list[SuiteResult]) -> None:
+    """Print a human-readable summary of all suite results."""
+    print("\n" + "=" * 70)
+    print("EXTERNAL TEST SUITE RESULTS")
+    print("=" * 70)
+
+    for r in results:
+        icon = {"passed": "✓", "failed": "✗", "skipped": "○", "error": "!"}.get(r.status, "?")
+        line = f"  {icon} {r.name}"
+        if r.status == "skipped":
+            line += f" — {r.message}"
+        elif r.tests_run > 0:
+            line += f" — {r.tests_passed}/{r.tests_run} passed"
+            if r.tests_failed:
+                line += f", {r.tests_failed} failed"
+            if r.tests_errored:
+                line += f", {r.tests_errored} errors"
+            line += f" ({r.duration_secs}s)"
+        elif r.status == "error":
+            line += f" — {r.message}"
+        print(line)
+
+    print("=" * 70)
+
+    total_run = sum(r.tests_run for r in results)
+    total_passed = sum(r.tests_passed for r in results)
+    total_failed = sum(r.tests_failed for r in results)
+    total_errored = sum(r.tests_errored for r in results)
+    active = [r for r in results if r.status not in ("skipped",)]
+
+    if active:
+        print(f"  Total: {total_passed}/{total_run} passed", end="")
+        if total_failed:
+            print(f", {total_failed} failed", end="")
+        if total_errored:
+            print(f", {total_errored} errors", end="")
+        print()
+
+    skipped = [r for r in results if r.status == "skipped"]
+    if skipped:
+        print(f"  Skipped: {len(skipped)} suite(s)")
+
+    all_passed = all(r.status in ("passed", "skipped") for r in results)
+    any_active = any(r.status not in ("skipped",) for r in results)
+    if all_passed and any_active:
+        print("  GATE: PASSED")
+    elif not any_active:
+        print("  GATE: NO SUITES RAN")
+    else:
+        print("  GATE: FAILED")
+    print()
+def write_report(results: list[SuiteResult], path: Path) -> None:
+    """Write a JSON report of all suite results."""
+    report = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "suites": [
+            {
+                "name": r.name,
+                "status": r.status,
+                "tests_run": r.tests_run,
+                "tests_passed": r.tests_passed,
+                "tests_failed": r.tests_failed,
+                "tests_errored": r.tests_errored,
+                "tests_skipped": r.tests_skipped,
+                "duration_secs": r.duration_secs,
+                "message": r.message,
+            }
+            for r in results
+        ],
+    }
+    path.write_text(json.dumps(report, indent=2) + "\n")
+    print(f"Report written to {path}")
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Run external test suites against extenddb",
+    )
+    parser.add_argument(
+        "--config", default="external-suites.toml",
+        help="Path to suite registry (default: external-suites.toml)",
+    )
+    parser.add_argument(
+        "--suite", action="append", dest="suites",
+        help="Run only the named suite (can be repeated)",
+    )
+    parser.add_argument(
+        "--endpoint",
+        default=os.environ.get("EXTENDDB_ENDPOINT", "http://localhost:8000"),
+        help="extenddb endpoint URL (default: $EXTENDDB_ENDPOINT or http://localhost:8000)",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Show what would run")
+    parser.add_argument("--report", help="Write JSON report to PATH")
+    parser.add_argument("--verbose", action="store_true", help="Show full test output")
+    args = parser.parse_args()
+
+    config_path = Path(args.config)
+    suites = load_suites(config_path)
+
+    # Filter to requested suites
+    if args.suites:
+        names = set(args.suites)
+        suites = [s for s in suites if s.name in names]
+        if not suites:
+            print(f"error: no matching suites found for: {', '.join(names)}", file=sys.stderr)
+            sys.exit(1)
+
+    print(f"extenddb external test runner")
+    print(f"  endpoint: {args.endpoint}")
+    print(f"  config:   {config_path}")
+    print(f"  suites:   {len(suites)}")
+    print()
+
+    if args.dry_run:
+        for suite in suites:
+            status = "enabled" if suite.enabled else "disabled"
+            print(f"  [{status}] {suite.name}")
+            print(f"    path:   {suite.path}")
+            print(f"    runner: {suite.runner}")
+            print(f"    cmd:    {' '.join(build_command(suite))}")
+            if suite.env:
+                print(f"    env:    {suite.env}")
+            missing = check_prereqs(suite.runner)
+            if missing:
+                print(f"    MISSING: {', '.join(missing)}")
+            print()
+        return
+
+    results: list[SuiteResult] = []
+    for suite in suites:
+        print(f"Running: {suite.name} ...")
+        result = run_suite(suite, args.endpoint, args.verbose)
+        results.append(result)
+
+        if args.verbose and result.output:
+            print(result.output)
+
+    print_summary(results)
+
+    if args.report:
+        write_report(results, Path(args.report))
+
+    # Exit with failure if any suite failed
+    if any(r.status in ("failed", "error") for r in results):
+        sys.exit(1)
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,328 @@
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+
+"""Tests for TransactGetItems and TransactWriteItems operations.
+
+REQ-TEST-001: All implemented operations have passing tests.
+"""
+
+from __future__ import annotations
+
+import pytest
+from botocore.exceptions import ClientError
+
+from conftest import wait_for_active
+@pytest.fixture()
+def hash_table(dynamodb_client, create_and_cleanup_table, unique_table_name):
+    """Create a hash-only table and wait for ACTIVE."""
+    create_and_cleanup_table(unique_table_name)
+    wait_for_active(dynamodb_client, unique_table_name)
+    return unique_table_name
+# ---------------------------------------------------------------------------
+# TransactWriteItems — happy paths
+# ---------------------------------------------------------------------------
+def test_transact_write_put_single(dynamodb_client, hash_table):
+    """TransactWriteItems with a single Put."""
+    dynamodb_client.transact_write_items(
+        TransactItems=[
+            {"Put": {"TableName": hash_table, "Item": {"pk": {"S": "tw-1"}, "data": {"S": "hello"}}}}
+        ]
+    )
+    resp = dynamodb_client.get_item(TableName=hash_table, Key={"pk": {"S": "tw-1"}})
+    assert resp["Item"]["data"]["S"] == "hello"
+def test_transact_write_put_multiple(dynamodb_client, hash_table):
+    """TransactWriteItems with multiple Puts across same table."""
+    dynamodb_client.transact_write_items(
+        TransactItems=[
+            {"Put": {"TableName": hash_table, "Item": {"pk": {"S": f"tw-{i}"}, "val": {"N": str(i)}}}}
+            for i in range(5)
+        ]
+    )
+    for i in range(5):
+        resp = dynamodb_client.get_item(TableName=hash_table, Key={"pk": {"S": f"tw-{i}"}})
+        assert resp["Item"]["val"]["N"] == str(i)
+def test_transact_write_delete(dynamodb_client, hash_table):
+    """TransactWriteItems with Delete."""
+    dynamodb_client.put_item(TableName=hash_table, Item={"pk": {"S": "del-1"}, "x": {"S": "y"}})
+    dynamodb_client.transact_write_items(
+        TransactItems=[
+            {"Delete": {"TableName": hash_table, "Key": {"pk": {"S": "del-1"}}}}
+        ]
+    )
+    resp = dynamodb_client.get_item(TableName=hash_table, Key={"pk": {"S": "del-1"}})
+    assert "Item" not in resp
+def test_transact_write_update(dynamodb_client, hash_table):
+    """TransactWriteItems with Update."""
+    dynamodb_client.put_item(TableName=hash_table, Item={"pk": {"S": "upd-1"}, "counter": {"N": "0"}})
+    dynamodb_client.transact_write_items(
+        TransactItems=[
+            {
+                "Update": {
+                    "TableName": hash_table,
+                    "Key": {"pk": {"S": "upd-1"}},
+                    "UpdateExpression": "SET #c = #c + :inc",
+                    "ExpressionAttributeNames": {"#c": "counter"},
+                    "ExpressionAttributeValues": {":inc": {"N": "5"}},
+                }
+            }
+        ]
+    )
+    resp = dynamodb_client.get_item(TableName=hash_table, Key={"pk": {"S": "upd-1"}})
+    assert resp["Item"]["counter"]["N"] == "5"
+def test_transact_write_condition_check_pass(dynamodb_client, hash_table):
+    """TransactWriteItems with ConditionCheck that passes."""
+    dynamodb_client.put_item(TableName=hash_table, Item={"pk": {"S": "cc-1"}, "status": {"S": "active"}})
+    dynamodb_client.transact_write_items(
+        TransactItems=[
+            {
+                "ConditionCheck": {
+                    "TableName": hash_table,
+                    "Key": {"pk": {"S": "cc-1"}},
+                    "ConditionExpression": "#s = :v",
+                    "ExpressionAttributeNames": {"#s": "status"},
+                    "ExpressionAttributeValues": {":v": {"S": "active"}},
+                }
+            },
+            {"Put": {"TableName": hash_table, "Item": {"pk": {"S": "cc-2"}, "data": {"S": "ok"}}}},
+        ]
+    )
+    resp = dynamodb_client.get_item(TableName=hash_table, Key={"pk": {"S": "cc-2"}})
+    assert resp["Item"]["data"]["S"] == "ok"
+def test_transact_write_mixed_ops(dynamodb_client, hash_table):
+    """TransactWriteItems with Put + Delete + Update in one transaction."""
+    dynamodb_client.put_item(TableName=hash_table, Item={"pk": {"S": "mix-del"}, "x": {"S": "y"}})
+    dynamodb_client.put_item(TableName=hash_table, Item={"pk": {"S": "mix-upd"}, "n": {"N": "1"}})
+    dynamodb_client.transact_write_items(
+        TransactItems=[
+            {"Put": {"TableName": hash_table, "Item": {"pk": {"S": "mix-put"}, "v": {"S": "new"}}}},
+            {"Delete": {"TableName": hash_table, "Key": {"pk": {"S": "mix-del"}}}},
+            {
+                "Update": {
+                    "TableName": hash_table,
+                    "Key": {"pk": {"S": "mix-upd"}},
+                    "UpdateExpression": "SET n = n + :one",
+                    "ExpressionAttributeValues": {":one": {"N": "1"}},
+                }
+            },
+        ]
+    )
+    assert dynamodb_client.get_item(TableName=hash_table, Key={"pk": {"S": "mix-put"}})["Item"]["v"]["S"] == "new"
+    assert "Item" not in dynamodb_client.get_item(TableName=hash_table, Key={"pk": {"S": "mix-del"}})
+    assert dynamodb_client.get_item(TableName=hash_table, Key={"pk": {"S": "mix-upd"}})["Item"]["n"]["N"] == "2"
+# ---------------------------------------------------------------------------
+# TransactWriteItems — atomicity (condition failure rolls back all)
+# ---------------------------------------------------------------------------
+def test_transact_write_condition_fail_rolls_back(dynamodb_client, hash_table):
+    """When a ConditionCheck fails, the entire transaction is rolled back."""
+    dynamodb_client.put_item(TableName=hash_table, Item={"pk": {"S": "guard"}, "status": {"S": "inactive"}})
+    with pytest.raises(ClientError) as exc_info:
+        dynamodb_client.transact_write_items(
+            TransactItems=[
+                {"Put": {"TableName": hash_table, "Item": {"pk": {"S": "should-not-exist"}, "v": {"S": "x"}}}},
+                {
+                    "ConditionCheck": {
+                        "TableName": hash_table,
+                        "Key": {"pk": {"S": "guard"}},
+                        "ConditionExpression": "#s = :v",
+                        "ExpressionAttributeNames": {"#s": "status"},
+                        "ExpressionAttributeValues": {":v": {"S": "active"}},
+                    }
+                },
+            ]
+        )
+    assert exc_info.value.response["Error"]["Code"] == "TransactionCanceledException"
+    # The Put should NOT have been applied
+    resp = dynamodb_client.get_item(TableName=hash_table, Key={"pk": {"S": "should-not-exist"}})
+    assert "Item" not in resp
+def test_transact_write_cancellation_reasons(dynamodb_client, hash_table):
+    """TransactionCanceledException includes per-item CancellationReasons."""
+    dynamodb_client.put_item(TableName=hash_table, Item={"pk": {"S": "cr-1"}, "status": {"S": "bad"}})
+    with pytest.raises(ClientError) as exc_info:
+        dynamodb_client.transact_write_items(
+            TransactItems=[
+                {"Put": {"TableName": hash_table, "Item": {"pk": {"S": "cr-new"}, "v": {"S": "x"}}}},
+                {
+                    "ConditionCheck": {
+                        "TableName": hash_table,
+                        "Key": {"pk": {"S": "cr-1"}},
+                        "ConditionExpression": "#s = :v",
+                        "ExpressionAttributeNames": {"#s": "status"},
+                        "ExpressionAttributeValues": {":v": {"S": "good"}},
+                    }
+                },
+            ]
+        )
+    err = exc_info.value.response["Error"]
+    assert err["Code"] == "TransactionCanceledException"
+    reasons = exc_info.value.response.get("CancellationReasons", [])
+    assert len(reasons) == 2
+    assert reasons[0]["Code"] == "None"
+    assert reasons[1]["Code"] == "ConditionalCheckFailed"
+# ---------------------------------------------------------------------------
+# TransactWriteItems — validation errors
+# ---------------------------------------------------------------------------
+def test_transact_write_empty_items(dynamodb_client):
+    """TransactWriteItems with empty TransactItems → client-side validation."""
+    with pytest.raises(Exception):
+        dynamodb_client.transact_write_items(TransactItems=[])
+def test_transact_write_too_many_items(dynamodb_client, hash_table):
+    """TransactWriteItems with > 100 items → ValidationException."""
+    items = [
+        {"Put": {"TableName": hash_table, "Item": {"pk": {"S": f"tw-{i}"}}}}
+        for i in range(101)
+    ]
+    with pytest.raises(ClientError) as exc_info:
+        dynamodb_client.transact_write_items(TransactItems=items)
+    assert exc_info.value.response["Error"]["Code"] == "ValidationException"
+def test_transact_write_duplicate_targets(dynamodb_client, hash_table):
+    """TransactWriteItems with two ops targeting same item → ValidationException."""
+    with pytest.raises(ClientError) as exc_info:
+        dynamodb_client.transact_write_items(
+            TransactItems=[
+                {"Put": {"TableName": hash_table, "Item": {"pk": {"S": "dup"}, "v": {"S": "a"}}}},
+                {"Put": {"TableName": hash_table, "Item": {"pk": {"S": "dup"}, "v": {"S": "b"}}}},
+            ]
+        )
+    assert exc_info.value.response["Error"]["Code"] == "ValidationException"
+def test_transact_write_put_wrong_key_type(dynamodb_client, hash_table):
+    """TransactWriteItems Put with wrong key type → TransactionCanceledException."""
+    with pytest.raises(ClientError) as exc_info:
+        dynamodb_client.transact_write_items(
+            TransactItems=[
+                {"Put": {"TableName": hash_table, "Item": {"pk": {"N": "123"}}}}
+            ]
+        )
+    err = exc_info.value.response["Error"]
+    assert err["Code"] == "TransactionCanceledException"
+    reasons = exc_info.value.response.get("CancellationReasons", [])
+    assert len(reasons) == 1
+    assert reasons[0]["Code"] == "ValidationError"
+def test_transact_write_delete_wrong_key_type(dynamodb_client, hash_table):
+    """TransactWriteItems Delete with wrong key type → TransactionCanceledException."""
+    with pytest.raises(ClientError) as exc_info:
+        dynamodb_client.transact_write_items(
+            TransactItems=[
+                {"Delete": {"TableName": hash_table, "Key": {"pk": {"N": "123"}}}}
+            ]
+        )
+    err = exc_info.value.response["Error"]
+    assert err["Code"] == "TransactionCanceledException"
+    reasons = exc_info.value.response.get("CancellationReasons", [])
+    assert len(reasons) == 1
+    assert reasons[0]["Code"] == "ValidationError"
+def test_transact_write_update_wrong_key_type(dynamodb_client, hash_table):
+    """TransactWriteItems Update with wrong key type → TransactionCanceledException."""
+    with pytest.raises(ClientError) as exc_info:
+        dynamodb_client.transact_write_items(
+            TransactItems=[
+                {
+                    "Update": {
+                        "TableName": hash_table,
+                        "Key": {"pk": {"N": "123"}},
+                        "UpdateExpression": "SET v = :v",
+                        "ExpressionAttributeValues": {":v": {"S": "x"}},
+                    }
+                }
+            ]
+        )
+    err = exc_info.value.response["Error"]
+    assert err["Code"] == "TransactionCanceledException"
+    reasons = exc_info.value.response.get("CancellationReasons", [])
+    assert len(reasons) == 1
+    assert reasons[0]["Code"] == "ValidationError"
+# ---------------------------------------------------------------------------
+# TransactGetItems — happy paths
+# ---------------------------------------------------------------------------
+def test_transact_get_single(dynamodb_client, hash_table):
+    """TransactGetItems with a single Get."""
+    dynamodb_client.put_item(TableName=hash_table, Item={"pk": {"S": "tg-1"}, "data": {"S": "val"}})
+    resp = dynamodb_client.transact_get_items(
+        TransactItems=[
+            {"Get": {"TableName": hash_table, "Key": {"pk": {"S": "tg-1"}}}}
+        ]
+    )
+    assert len(resp["Responses"]) == 1
+    assert resp["Responses"][0]["Item"]["data"]["S"] == "val"
+def test_transact_get_multiple(dynamodb_client, hash_table):
+    """TransactGetItems with multiple Gets."""
+    for i in range(3):
+        dynamodb_client.put_item(TableName=hash_table, Item={"pk": {"S": f"tg-{i}"}, "n": {"N": str(i)}})
+    resp = dynamodb_client.transact_get_items(
+        TransactItems=[
+            {"Get": {"TableName": hash_table, "Key": {"pk": {"S": f"tg-{i}"}}}}
+            for i in range(3)
+        ]
+    )
+    assert len(resp["Responses"]) == 3
+    for i in range(3):
+        assert resp["Responses"][i]["Item"]["n"]["N"] == str(i)
+def test_transact_get_missing_item(dynamodb_client, hash_table):
+    """TransactGetItems returns empty object (no Item key) for missing items."""
+    dynamodb_client.put_item(TableName=hash_table, Item={"pk": {"S": "exists"}, "v": {"S": "yes"}})
+    resp = dynamodb_client.transact_get_items(
+        TransactItems=[
+            {"Get": {"TableName": hash_table, "Key": {"pk": {"S": "exists"}}}},
+            {"Get": {"TableName": hash_table, "Key": {"pk": {"S": "missing"}}}},
+        ]
+    )
+    assert len(resp["Responses"]) == 2
+    assert resp["Responses"][0]["Item"]["v"]["S"] == "yes"
+    # Missing item returns empty object — no Item key present.
+    assert "Item" not in resp["Responses"][1]
+# ---------------------------------------------------------------------------
+# TransactGetItems — validation errors
+# ---------------------------------------------------------------------------
+def test_transact_get_empty_items(dynamodb_client):
+    """TransactGetItems with empty TransactItems → client-side validation."""
+    with pytest.raises(Exception):
+        dynamodb_client.transact_get_items(TransactItems=[])
+def test_transact_get_wrong_key_type(dynamodb_client, hash_table):
+    """TransactGetItems with wrong key type → TransactionCanceledException."""
+    with pytest.raises(ClientError) as exc_info:
+        dynamodb_client.transact_get_items(
+            TransactItems=[
+                {"Get": {"TableName": hash_table, "Key": {"pk": {"N": "123"}}}}
+            ]
+        )
+    err = exc_info.value.response["Error"]
+    assert err["Code"] == "TransactionCanceledException"
+    reasons = exc_info.value.response.get("CancellationReasons", [])
+    assert len(reasons) == 1
+    assert reasons[0]["Code"] == "ValidationError"
+# ---------------------------------------------------------------------------
+# TransactWriteItems — conditional Put
+# ---------------------------------------------------------------------------
+def test_transact_write_conditional_put_pass(dynamodb_client, hash_table):
+    """TransactWriteItems Put with passing condition."""
+    dynamodb_client.transact_write_items(
+        TransactItems=[
+            {
+                "Put": {
+                    "TableName": hash_table,
+                    "Item": {"pk": {"S": "cp-1"}, "v": {"S": "new"}},
+                    "ConditionExpression": "attribute_not_exists(pk)",
+                }
+            }
+        ]
+    )
+    resp = dynamodb_client.get_item(TableName=hash_table, Key={"pk": {"S": "cp-1"}})
+    assert resp["Item"]["v"]["S"] == "new"
+def test_transact_write_conditional_put_fail(dynamodb_client, hash_table):
+    """TransactWriteItems Put with failing condition → TransactionCanceledException."""
+    dynamodb_client.put_item(TableName=hash_table, Item={"pk": {"S": "cp-2"}, "v": {"S": "old"}})
+    with pytest.raises(ClientError) as exc_info:
+        dynamodb_client.transact_write_items(
+            TransactItems=[
+                {
+                    "Put": {
+                        "TableName": hash_table,
+                        "Item": {"pk": {"S": "cp-2"}, "v": {"S": "new"}},
+                        "ConditionExpression": "attribute_not_exists(pk)",
+                    }
+                }
+            ]
+        )
+    assert exc_info.value.response["Error"]["Code"] == "TransactionCanceledException"
+    # Original item unchanged
+    resp = dynamodb_client.get_item(TableName=hash_table, Key={"pk": {"S": "cp-2"}})
+    assert resp["Item"]["v"]["S"] == "old"

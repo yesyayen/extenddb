@@ -1,0 +1,112 @@
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+
+"""Shared fixtures for extenddb dual-target tests.
+
+Tests run against both real DynamoDB and extenddb with identical assertions.
+The target is controlled by the EXTENDDB_TEST_ENDPOINT environment variable:
+  - Unset or empty: tests run against real DynamoDB (requires AWS credentials)
+  - Set to a URL: tests run against extenddb at that URL
+
+REQ-TEST-002, REQ-TEST-003
+"""
+
+from __future__ import annotations
+
+import os
+import time
+import uuid
+
+import boto3
+import pytest
+import urllib3
+
+# D4: Suppress InsecureRequestWarning for self-signed TLS certs from ``extenddb init``.
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+@pytest.fixture(scope="session")
+def endpoint_url() -> str | None:
+    """Return the endpoint URL if targeting extenddb, None for real DynamoDB."""
+    url = os.environ.get("EXTENDDB_TEST_ENDPOINT", "").strip()
+    return url if url else None
+@pytest.fixture(scope="session")
+def dynamodb_client(endpoint_url: str | None):
+    """Create a boto3 DynamoDB client targeting either extenddb or real DynamoDB.
+
+    When targeting extenddb over HTTPS with a self-signed certificate, SSL
+    verification is disabled (the default ``extenddb init`` cert is self-signed).
+    """
+    kwargs: dict = {
+        "service_name": "dynamodb",
+        "region_name": os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+    }
+    if endpoint_url:
+        kwargs["endpoint_url"] = endpoint_url
+        # D4: Self-signed certs from `extenddb init` — disable SSL verification.
+        if endpoint_url.startswith("https://"):
+            kwargs["verify"] = False
+    return boto3.client(**kwargs)
+@pytest.fixture()
+def unique_table_name() -> str:
+    """Generate a unique table name for test isolation."""
+    return f"extenddb-test-{uuid.uuid4().hex[:12]}"
+def wait_for_active(client, table_name: str, timeout: float = 60.0) -> None:
+    """Poll DescribeTable until status is ACTIVE.
+
+    Shared helper — import from conftest instead of duplicating per-module.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        resp = client.describe_table(TableName=table_name)
+        if resp["Table"]["TableStatus"] == "ACTIVE":
+            return
+        time.sleep(0.2)
+    raise TimeoutError(f"Table {table_name} did not become ACTIVE within {timeout}s")
+@pytest.fixture()
+def create_and_cleanup_table(dynamodb_client, unique_table_name):
+    """Create a table and ensure it's deleted after the test (REQ-TEST-005)."""
+    created_tables: list[str] = []
+
+    def _create(table_name: str | None = None, **kwargs) -> dict:
+        name = table_name or unique_table_name
+        defaults = {
+            "TableName": name,
+            "AttributeDefinitions": [
+                {"AttributeName": "pk", "AttributeType": "S"},
+            ],
+            "KeySchema": [
+                {"AttributeName": "pk", "KeyType": "HASH"},
+            ],
+            "BillingMode": "PAY_PER_REQUEST",
+        }
+        defaults.update(kwargs)
+        result = dynamodb_client.create_table(**defaults)
+        created_tables.append(name)
+        # D-2: Always wait for ACTIVE — matches real DynamoDB behavior.
+        wait_for_active(dynamodb_client, name)
+        return result
+
+    yield _create
+
+    # Cleanup: delete all tables created during the test, then wait for
+    # deletion to complete so teardown doesn't race with the next test.
+    for name in created_tables:
+        try:
+            dynamodb_client.delete_table(TableName=name)
+        except dynamodb_client.exceptions.ResourceNotFoundException:
+            continue
+        except dynamodb_client.exceptions.ResourceInUseException:
+            # Table is already being deleted (e.g., test called delete_table directly).
+            # Fall through to wait_for_deleted below.
+            pass
+        # Wait for the table to be fully removed.
+        wait_for_deleted(dynamodb_client, name)
+def wait_for_deleted(client, table_name: str, timeout: float = 60.0) -> None:
+    """Poll DescribeTable until the table no longer exists."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            client.describe_table(TableName=table_name)
+        except client.exceptions.ResourceNotFoundException:
+            return
+        time.sleep(0.2)
+    raise TimeoutError(f"Table {table_name} was not deleted within {timeout}s")

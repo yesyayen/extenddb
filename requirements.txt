@@ -1,0 +1,14 @@
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+# extenddb Python dependencies — testing and documentation.
+# Pinned for reproducibility; versions match the development environment.
+
+# Testing
+boto3==1.33.13
+pytest==7.4.4
+pytest-cov==4.1.0
+requests==2.31.0
+
+# Documentation (PDF build via docs/build-docs.py)
+Markdown==3.4.4
+WeasyPrint==52.5

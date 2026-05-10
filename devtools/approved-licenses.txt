@@ -1,0 +1,128 @@
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+
+#
+# Amazon pre-approved open source licenses (SPDX identifiers)
+# Source: https://policy.a2z.com/docs/82475/publication#0ac159cb-89be-3e40-bc20-f67d4b2dbad0
+# Last reviewed: 2026-04-20
+#
+# Lines starting with # are comments. Blank lines are ignored.
+
+# Academic Free License
+AFL-2.1
+AFL-3.0
+
+# Amazon Software License
+Amazon-ASL
+
+# Apache
+Apache-1.1
+Apache-2.0
+
+# Apache with LLVM exception
+Apache-2.0 WITH LLVM-exception
+
+# Artistic
+Artistic-1.0
+Artistic-1.0-Perl
+
+# Boost
+BSL-1.0
+
+# BSD family
+0BSD
+BSD-2-Clause
+BSD-2-Clause-Patent
+BSD-3-Clause
+
+# Creative Commons
+CC-BY-2.0
+CC-BY-2.5
+CC-BY-3.0
+CC-BY-4.0
+CC0-1.0
+
+# Code Project Open License
+CPOL-1.02
+
+# Curl
+curl
+
+# Eiffel Forum License
+EFL-2.0
+
+# FreeType
+FTL
+
+# HPND-sell-variant
+HPND-sell-variant
+
+# ImageMagick
+ImageMagick
+
+# ISC
+ISC
+
+# JPEG
+JPEG
+
+# MIT family
+MIT
+MIT-0
+MIT-CMU
+X11
+Expat
+
+# Mulan PSL
+MulanPSL-2.0
+
+# OpenLDAP
+OLDAP-2.8
+
+# OpenSSL
+OpenSSL
+
+# PDDL
+PDDL-1.0
+
+# PHP
+PHP-3.0
+PHP-3.01
+
+# PostgreSQL
+PostgreSQL
+
+# Python
+PSF-2.0
+
+# Ruby
+Ruby
+
+# SIL Open Font
+OFL-1.1
+
+# SQLite (public domain)
+blessing
+
+# Tcl/Tk
+TCL
+
+# University of Illinois
+NCSA
+
+# Unlicense
+Unlicense
+
+# W3C
+W3C
+W3C-19980720
+W3C-20150513
+
+# WTFPL
+WTFPL
+
+# Zlib
+Zlib
+
+# Zope
+ZPL-2.1

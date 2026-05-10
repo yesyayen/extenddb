@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+"""Delete orphaned test tables after test suite runs.
+
+Scans for tables matching known test naming patterns and deletes them.
+Handles pagination and rate limiting.
+
+Usage:
+    devtools/cleanup-test-tables
+
+Requires:
+    AWS_ACCESS_KEY_ID     — credentials for the target
+    AWS_SECRET_ACCESS_KEY — credentials for the target
+    EXTENDDB_TEST_ENDPOINT    — (optional) endpoint URL for local extenddb/extenddb
+    EXTENDDB_CA_CERT          — (optional) CA cert for TLS verification
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import sys
+import time
+
+import boto3
+from botocore.config import Config
+
+# Patterns that identify test tables (prefix + underscore + suffix)
+TEST_PREFIXES = [
+    "SimpleKeyString_",
+    "CompKeyStringNumber_",
+    "CompKeyBlobNumber_",
+    "CompKeyNumberString_",
+    "SimpleKeyStringGSI_",
+    "CompKeyStringStringGSI_",
+    "test_dtype_",
+    "test_empty_",
+    "test_err_",
+    "test_tag_",
+    "test_ttl_",
+    "test_unicode_",
+    "AuthTest_",
+    "DelBackup_",
+    "DescBackup_",
+    "ListBackup_",
+    "PITREnable_",
+    "RestoreBackup_",
+]
+
+# Patterns with timestamp suffix (name + _ + digits)
+TEST_TIMESTAMP_PREFIXES = [
+    "Scan",
+    "Backup",
+    "Throttle",
+    "PITRRestore",
+]
+
+# Compiled regex for timestamp-suffixed patterns: e.g. Scan<anything>_<digits>
+_TS_PATTERN = re.compile(
+    r"^(" + "|".join(re.escape(p) for p in TEST_TIMESTAMP_PREFIXES) + r").+_\d+$"
+)
+
+
+def is_test_table(name: str) -> bool:
+    """Return True if the table name matches a known test pattern."""
+    for prefix in TEST_PREFIXES:
+        if name.startswith(prefix):
+            return True
+    return bool(_TS_PATTERN.match(name))
+
+
+def get_client():
+    """Create a DynamoDB client using environment configuration."""
+    endpoint = os.environ.get("EXTENDDB_TEST_ENDPOINT")
+    ca_cert = os.environ.get("EXTENDDB_CA_CERT")
+
+    kwargs = {"config": Config(retries={"max_attempts": 3, "mode": "adaptive"})}
+    if endpoint:
+        kwargs["endpoint_url"] = endpoint
+        kwargs["verify"] = ca_cert if ca_cert else False
+
+    return boto3.client("dynamodb", **kwargs)
+
+
+def list_all_tables(client) -> list[str]:
+    """List all tables, handling pagination."""
+    tables = []
+    kwargs = {}
+    while True:
+        resp = client.list_tables(**kwargs)
+        tables.extend(resp.get("TableNames", []))
+        token = resp.get("LastEvaluatedTableName")
+        if not token:
+            break
+        kwargs["ExclusiveStartTableName"] = token
+    return tables
+
+
+def main() -> int:
+    client = get_client()
+    all_tables = list_all_tables(client)
+    to_delete = [t for t in all_tables if is_test_table(t)]
+
+    if not to_delete:
+        print("  cleanup: no orphaned test tables found")
+        return 0
+
+    print(f"  cleanup: found {len(to_delete)} orphaned test table(s), deleting...")
+    deleted = 0
+    errors = 0
+    for name in to_delete:
+        try:
+            client.delete_table(TableName=name)
+            deleted += 1
+        except client.exceptions.ResourceNotFoundException:
+            pass  # Already gone
+        except Exception as e:
+            # Rate limiting — back off and retry once
+            if "LimitExceededException" in str(type(e).__name__) or "ThrottlingException" in str(type(e).__name__):
+                time.sleep(1)
+                try:
+                    client.delete_table(TableName=name)
+                    deleted += 1
+                except Exception:
+                    errors += 1
+                    print(f"    ✗ failed to delete: {name}", file=sys.stderr)
+            else:
+                errors += 1
+                print(f"    ✗ failed to delete: {name} ({e})", file=sys.stderr)
+        # Small delay to avoid hitting rate limits
+        if deleted % 10 == 0 and deleted > 0:
+            time.sleep(0.5)
+
+    print(f"  cleanup: deleted {deleted} table(s)", end="")
+    if errors:
+        print(f", {errors} error(s)")
+    else:
+        print()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,210 @@
+// Copyright 2026 ExtendDB contributors
+// SPDX-License-Identifier: Apache-2.0
+use serde::{Deserialize, Serialize};
+
+/// Key schema element — defines a key attribute and its role.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KeySchemaElement {
+    #[serde(rename = "AttributeName")]
+    pub attribute_name: String,
+    #[serde(rename = "KeyType")]
+    pub key_type: KeyType,
+}
+
+/// Key type — HASH (partition key) or RANGE (sort key).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum KeyType {
+    Hash,
+    Range,
+}
+
+/// Attribute definition — maps an attribute name to a scalar type.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AttributeDefinition {
+    #[serde(rename = "AttributeName")]
+    pub attribute_name: String,
+    #[serde(rename = "AttributeType")]
+    pub attribute_type: ScalarAttributeType,
+}
+
+/// Scalar attribute type — only S, N, B are valid for key attributes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ScalarAttributeType {
+    S,
+    N,
+    B,
+}
+
+/// Lightweight key schema + attribute definitions for a table.
+///
+/// Used by data operations (`PutItem`, `GetItem`) that need key metadata
+/// without the full `TableDescription` overhead. Includes stream specification
+/// so write operations can check stream status without an extra SQL round-trip.
+#[derive(Debug, Clone)]
+pub struct TableKeyInfo {
+    pub table_name: String,
+    pub account_id: String,
+    pub table_id: String,
+    pub key_schema: Vec<KeySchemaElement>,
+    pub attribute_definitions: Vec<AttributeDefinition>,
+    /// Whether the table has at least one local secondary index.
+    /// Used to decide whether `ItemCollectionMetrics` should be returned.
+    pub has_lsi: bool,
+    /// Stream specification for the table, if streams are configured.
+    /// Cached here to avoid an extra `describe_table` call per write operation.
+    pub stream_specification: Option<super::StreamSpecification>,
+}
+
+/// Extract all HASH key elements from a key schema (preserving order).
+pub fn hash_key_elements(key_schema: &[KeySchemaElement]) -> Vec<&KeySchemaElement> {
+    key_schema
+        .iter()
+        .filter(|ks| ks.key_type == KeyType::Hash)
+        .collect()
+}
+
+/// Extract all RANGE key elements from a key schema (preserving order).
+pub fn range_key_elements(key_schema: &[KeySchemaElement]) -> Vec<&KeySchemaElement> {
+    key_schema
+        .iter()
+        .filter(|ks| ks.key_type == KeyType::Range)
+        .collect()
+}
+
+/// Returns `true` if the key schema has more than one HASH or more than one RANGE element.
+pub fn is_multipart_key_schema(key_schema: &[KeySchemaElement]) -> bool {
+    let hash_count = key_schema
+        .iter()
+        .filter(|ks| ks.key_type == KeyType::Hash)
+        .count();
+    let range_count = key_schema
+        .iter()
+        .filter(|ks| ks.key_type == KeyType::Range)
+        .count();
+    hash_count > 1 || range_count > 1
+}
+
+/// Index type — GSI or LSI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexType {
+    /// Global secondary index — different partition key allowed.
+    Gsi,
+    /// Local secondary index — same partition key as base table.
+    Lsi,
+}
+
+/// Metadata for a secondary index, used by query/scan operations.
+#[derive(Debug, Clone)]
+pub struct IndexInfo {
+    /// Name of the index.
+    pub index_name: String,
+    /// GSI or LSI.
+    pub index_type: IndexType,
+    /// Key schema of the index (HASH, optional RANGE).
+    pub key_schema: Vec<KeySchemaElement>,
+    /// Projection configuration.
+    pub projection: super::table::Projection,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ks(name: &str, key_type: KeyType) -> KeySchemaElement {
+        KeySchemaElement {
+            attribute_name: name.into(),
+            key_type,
+        }
+    }
+
+    #[test]
+    fn hash_key_elements_single() {
+        let schema = vec![ks("pk", KeyType::Hash)];
+        let hashes = hash_key_elements(&schema);
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(hashes[0].attribute_name, "pk");
+    }
+
+    #[test]
+    fn hash_key_elements_with_range() {
+        let schema = vec![ks("pk", KeyType::Hash), ks("sk", KeyType::Range)];
+        let hashes = hash_key_elements(&schema);
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(hashes[0].attribute_name, "pk");
+    }
+
+    #[test]
+    fn range_key_elements_present() {
+        let schema = vec![ks("pk", KeyType::Hash), ks("sk", KeyType::Range)];
+        let ranges = range_key_elements(&schema);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].attribute_name, "sk");
+    }
+
+    #[test]
+    fn range_key_elements_absent() {
+        let schema = vec![ks("pk", KeyType::Hash)];
+        let ranges = range_key_elements(&schema);
+        assert!(ranges.is_empty());
+    }
+
+    #[test]
+    fn is_multipart_single_hash() {
+        let schema = vec![ks("pk", KeyType::Hash)];
+        assert!(!is_multipart_key_schema(&schema));
+    }
+
+    #[test]
+    fn is_multipart_hash_and_range() {
+        let schema = vec![ks("pk", KeyType::Hash), ks("sk", KeyType::Range)];
+        assert!(!is_multipart_key_schema(&schema));
+    }
+
+    #[test]
+    fn is_multipart_two_hashes() {
+        let schema = vec![ks("pk1", KeyType::Hash), ks("pk2", KeyType::Hash)];
+        assert!(is_multipart_key_schema(&schema));
+    }
+
+    #[test]
+    fn is_multipart_two_ranges() {
+        let schema = vec![
+            ks("pk", KeyType::Hash),
+            ks("sk1", KeyType::Range),
+            ks("sk2", KeyType::Range),
+        ];
+        assert!(is_multipart_key_schema(&schema));
+    }
+
+    #[test]
+    fn key_schema_element_serde_roundtrip() {
+        let elem = ks("pk", KeyType::Hash);
+        let json = serde_json::to_string(&elem).unwrap();
+        let parsed: KeySchemaElement = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, elem);
+    }
+
+    #[test]
+    fn attribute_definition_serde_roundtrip() {
+        let def = AttributeDefinition {
+            attribute_name: "pk".into(),
+            attribute_type: ScalarAttributeType::S,
+        };
+        let json = serde_json::to_string(&def).unwrap();
+        let parsed: AttributeDefinition = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, def);
+    }
+
+    #[test]
+    fn scalar_attribute_types_serde() {
+        for (typ, expected) in [
+            (ScalarAttributeType::S, "\"S\""),
+            (ScalarAttributeType::N, "\"N\""),
+            (ScalarAttributeType::B, "\"B\""),
+        ] {
+            let json = serde_json::to_string(&typ).unwrap();
+            assert_eq!(json, expected);
+        }
+    }
+}

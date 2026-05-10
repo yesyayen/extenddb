@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+# Build release tarballs for extenddb.
+#
+# Usage: devtools/build-release [TARGET...]
+#
+# If no targets are specified, builds for the host target only.
+# Specify targets explicitly for cross-compilation:
+#   devtools/build-release x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
+#
+# Supported targets:
+#   x86_64-unknown-linux-gnu
+#   aarch64-unknown-linux-gnu
+#   x86_64-apple-darwin
+#   aarch64-apple-darwin
+#
+# Output: dist/extenddb-<version>-<target>.tar.gz + .sha256
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Extract version from workspace Cargo.toml
+VERSION=$(grep '^version' "$PROJECT_ROOT/Cargo.toml" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+if [ -z "$VERSION" ]; then
+    echo "ERROR: Could not extract version from Cargo.toml" >&2
+    exit 1
+fi
+
+DIST_DIR="$PROJECT_ROOT/dist"
+mkdir -p "$DIST_DIR"
+
+# Determine targets
+if [ $# -gt 0 ]; then
+    TARGETS=("$@")
+else
+    TARGETS=("$(rustc -vV | grep '^host:' | awk '{print $2}')")
+    echo "No targets specified — building for host: ${TARGETS[0]}"
+fi
+
+echo "Building extenddb v${VERSION}"
+echo "Output: ${DIST_DIR}"
+echo
+
+FAILED=()
+
+for TARGET in "${TARGETS[@]}"; do
+    echo "=== Building for ${TARGET} ==="
+
+    # Build
+    if ! cargo build --release --target "$TARGET" -p extenddb 2>&1; then
+        echo "FAILED: cargo build for ${TARGET}" >&2
+        FAILED+=("$TARGET")
+        continue
+    fi
+
+    BINARY="$PROJECT_ROOT/target/${TARGET}/release/extenddb"
+    if [ ! -f "$BINARY" ]; then
+        echo "FAILED: binary not found at ${BINARY}" >&2
+        FAILED+=("$TARGET")
+        continue
+    fi
+
+    # Create staging directory
+    STAGING=$(mktemp -d)
+    TARBALL_NAME="extenddb-${VERSION}-${TARGET}"
+
+    mkdir -p "$STAGING/$TARBALL_NAME"
+    cp "$BINARY" "$STAGING/$TARBALL_NAME/extenddb"
+    cp "$PROJECT_ROOT/extenddb.sample.toml" "$STAGING/$TARBALL_NAME/"
+    cp "$PROJECT_ROOT/README.md" "$STAGING/$TARBALL_NAME/"
+    cp "$PROJECT_ROOT/LICENSE" "$STAGING/$TARBALL_NAME/"
+
+    # Create tarball
+    TARBALL="${DIST_DIR}/${TARBALL_NAME}.tar.gz"
+    tar -czf "$TARBALL" -C "$STAGING" "$TARBALL_NAME"
+
+    # Create checksum (sha256sum on Linux, shasum on macOS)
+    if command -v sha256sum &>/dev/null; then
+        (cd "$DIST_DIR" && sha256sum "${TARBALL_NAME}.tar.gz" > "${TARBALL_NAME}.tar.gz.sha256")
+    elif command -v shasum &>/dev/null; then
+        (cd "$DIST_DIR" && shasum -a 256 "${TARBALL_NAME}.tar.gz" > "${TARBALL_NAME}.tar.gz.sha256")
+    else
+        echo "ERROR: No sha256sum or shasum found" >&2
+        FAILED+=("$TARGET")
+        continue
+    fi
+
+    rm -rf "$STAGING"
+
+    SIZE=$(du -h "$TARBALL" | cut -f1)
+    echo "  ${TARBALL_NAME}.tar.gz (${SIZE})"
+    echo "  ${TARBALL_NAME}.tar.gz.sha256"
+    echo
+done
+
+if [ ${#FAILED[@]} -gt 0 ]; then
+    echo "FAILED targets: ${FAILED[*]}" >&2
+    exit 1
+fi
+
+echo "Done. Release artifacts in ${DIST_DIR}/"

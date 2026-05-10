@@ -1,0 +1,134 @@
+// Copyright 2026 ExtendDB contributors
+// SPDX-License-Identifier: Apache-2.0
+
+//! Shared helpers for building expression maps and parsing expressions.
+
+use std::collections::HashMap;
+
+use extenddb_core::error::DynamoDbError;
+use extenddb_core::expression::{
+    Expr, ExpressionMaps, parse_condition_with_depth_limit, tokenize_with_limit,
+};
+use extenddb_core::limits::LimitsConfig;
+use extenddb_core::types::{AttributeValue, ConditionalOperator, ExpectedAttributeValue};
+
+use crate::expected::desugar_expected;
+
+/// Build `ExpressionMaps` from optional request fields.
+///
+/// Pre-parses all numeric placeholder values into `BigDecimal` so that
+/// filter expressions comparing a placeholder against many items parse
+/// the placeholder only once per request.
+pub fn build_expression_maps(
+    names: Option<&HashMap<String, String>>,
+    values: Option<&HashMap<String, AttributeValue>>,
+) -> ExpressionMaps {
+    ExpressionMaps::new(
+        names
+            .map(|m| {
+                m.iter()
+                    .map(|(k, v)| (k.strip_prefix('#').unwrap_or(k).to_owned(), v.clone()))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        values
+            .map(|m| {
+                m.iter()
+                    .map(|(k, v)| (k.strip_prefix(':').unwrap_or(k).to_owned(), v.clone()))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    )
+}
+
+/// Parse an optional condition expression string into an AST.
+///
+/// Returns `None` if the input is `None` or empty.
+///
+/// # Errors
+///
+/// Returns `DynamoDbError::ValidationException` for syntax errors.
+pub fn parse_optional_condition(
+    expr: Option<&str>,
+    limits: &LimitsConfig,
+) -> Result<Option<Expr>, DynamoDbError> {
+    match expr {
+        Some(s) if !s.is_empty() => {
+            let tokens = tokenize_with_limit(s, limits.max_expression_tokens)?;
+            let ast = parse_condition_with_depth_limit(&tokens, limits.max_expression_depth)?;
+            Ok(Some(ast))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Parse an optional filter expression string into an AST.
+///
+/// `FilterExpression` uses the same grammar as `ConditionExpression`.
+/// Returns `None` if the input is `None` or empty.
+///
+/// # Errors
+///
+/// Returns `DynamoDbError::ValidationException` for syntax errors.
+pub fn parse_optional_filter(
+    expr: Option<&str>,
+    limits: &LimitsConfig,
+) -> Result<Option<Expr>, DynamoDbError> {
+    parse_optional_condition(expr, limits)
+}
+
+/// Resolve a condition from either `ConditionExpression` or legacy `Expected`.
+///
+/// `DynamoDB` rejects requests that specify both. Returns the parsed condition
+/// AST and the expression maps to use for evaluation.
+///
+/// # Errors
+///
+/// Returns `ValidationException` if both `ConditionExpression` and `Expected` are set,
+/// or for any parsing/desugaring errors.
+pub fn resolve_condition(
+    condition_expression: Option<&str>,
+    names: Option<&HashMap<String, String>>,
+    values: Option<&HashMap<String, AttributeValue>>,
+    expected: Option<&HashMap<String, ExpectedAttributeValue>>,
+    conditional_operator: Option<ConditionalOperator>,
+    limits: &LimitsConfig,
+) -> Result<(Option<Expr>, ExpressionMaps), DynamoDbError> {
+    let has_condition = condition_expression.is_some_and(|s| !s.is_empty());
+    let has_expected = expected.is_some_and(|m| !m.is_empty());
+
+    if has_condition && has_expected {
+        return Err(DynamoDbError::ValidationException(
+            "Can not use both expression and non-expression parameters in the same request: \
+             Non-expression parameters: {Expected} Expression parameters: {ConditionExpression}"
+                .to_owned(),
+        ));
+    }
+
+    if let Some(exp) = expected.filter(|m| !m.is_empty()) {
+        let (expr, mut maps) = desugar_expected(exp, conditional_operator.unwrap_or_default())?;
+        // Merge request-level ExpressionAttributeNames/Values so UpdateExpression
+        // placeholders still resolve when Expected is used for the condition.
+        if let Some(n) = names {
+            for (k, v) in n {
+                maps.names
+                    .entry(k.strip_prefix('#').unwrap_or(k).to_owned())
+                    .or_insert_with(|| v.clone());
+            }
+        }
+        if let Some(v) = values {
+            for (k, val) in v {
+                maps.values
+                    .entry(k.strip_prefix(':').unwrap_or(k).to_owned())
+                    .or_insert_with(|| val.clone());
+            }
+        }
+        // Re-parse numerics after merging additional values.
+        maps.pre_parse_numerics();
+        return Ok((Some(expr), maps));
+    }
+
+    let maps = build_expression_maps(names, values);
+    let condition = parse_optional_condition(condition_expression, limits)?;
+    Ok((condition, maps))
+}

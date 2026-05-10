@@ -1,0 +1,146 @@
+// Copyright 2026 ExtendDB contributors
+// SPDX-License-Identifier: Apache-2.0
+
+//! `TransactGetItems` operation handler.
+
+use serde_json::Value;
+
+use extenddb_core::error::DynamoDbError;
+use extenddb_core::expression::{apply_projection, parse_projection, tokenize_with_limit};
+use extenddb_core::types::{
+    ItemResponse, TransactGetItemsInput, TransactGetItemsOutput, item_size_bytes,
+};
+use extenddb_storage::{DataEngine, TableEngine, TransactGetOp};
+
+use crate::OperationContext;
+use crate::capacity_helpers;
+use crate::create_table::storage_err_to_dynamo;
+use crate::expression_helpers::build_expression_maps;
+use crate::serialize_output;
+use crate::{DispatchMetrics, DispatchResult};
+
+/// Maximum number of items in a single `TransactGetItems` request.
+const MAX_TRANSACT_GET_ITEMS: usize = 100;
+
+/// Handle a `TransactGetItems` request.
+///
+/// Reads up to 100 items atomically in a single consistent snapshot.
+/// All items are returned in the same order as the request.
+///
+/// # Errors
+///
+/// Returns `DynamoDbError` for validation failures, missing tables, or storage errors.
+pub async fn handle_transact_get_items<S: TableEngine + DataEngine>(
+    body: Value,
+    ctx: &OperationContext<S>,
+) -> Result<DispatchResult, DynamoDbError> {
+    let input: TransactGetItemsInput = serde_json::from_value(body).map_err(|e| {
+        DynamoDbError::SerializationException(format!(
+            "Start of structure or map found where not expected: {e}"
+        ))
+    })?;
+
+    if input.transact_items.is_empty() {
+        return Err(DynamoDbError::ValidationException(
+            "1 validation error detected: Value null at 'transactItems' failed to satisfy constraint: Member must not be null".to_owned(),
+        ));
+    }
+
+    if input.transact_items.len() > MAX_TRANSACT_GET_ITEMS {
+        return Err(DynamoDbError::ValidationException(
+            "Member must have length less than or equal to 100".to_owned(),
+        ));
+    }
+
+    // Resolve table key info for each item
+    let mut key_infos = Vec::with_capacity(input.transact_items.len());
+    for tgi in &input.transact_items {
+        let key_info = ctx
+            .storage
+            .table_key_info(&ctx.account_id, &tgi.get.table_name)
+            .await
+            .map_err(storage_err_to_dynamo)?;
+        // Key type validation is deferred to the storage layer so that
+        // mismatches produce TransactionCanceledException with ValidationError
+        // cancellation reasons, matching real DynamoDB behavior.
+        key_infos.push(key_info);
+    }
+
+    // Build storage operations
+    let ops: Vec<TransactGetOp<'_>> = input
+        .transact_items
+        .iter()
+        .zip(key_infos.iter())
+        .map(|(tgi, ki)| TransactGetOp {
+            key_info: ki,
+            key: &tgi.get.key,
+        })
+        .collect();
+
+    let items = ctx
+        .storage
+        .transact_get_items(&ops)
+        .await
+        .map_err(storage_err_to_dynamo)?;
+
+    // Capacity metering: RCU rounded per item, then summed (M-1).
+    // TransactGetItems is always strongly consistent.
+    let mut per_table_rcu: std::collections::HashMap<String, f64> =
+        std::collections::HashMap::new();
+    let rcu: f64 = items
+        .iter()
+        .zip(input.transact_items.iter())
+        .filter_map(|(opt, tgi)| opt.as_ref().map(|item| (item, &tgi.get.table_name)))
+        .map(|(item, table_name)| {
+            let item_rcu = capacity_helpers::read_capacity_units(item_size_bytes(item), true);
+            *per_table_rcu.entry(table_name.clone()).or_default() += item_rcu;
+            item_rcu
+        })
+        .sum();
+    let total_pre_proj_bytes: usize = items
+        .iter()
+        .filter_map(|opt| opt.as_ref())
+        .map(item_size_bytes)
+        .sum();
+    let returned_count = items.iter().filter(|opt| opt.is_some()).count() as u64;
+
+    // Apply per-item projection
+    let responses: Vec<ItemResponse> = items
+        .into_iter()
+        .zip(input.transact_items.iter())
+        .map(|(opt, tgi)| {
+            let item = match (opt, tgi.get.projection_expression.as_deref()) {
+                (Some(item), Some(proj_str)) => {
+                    let proj_tokens =
+                        tokenize_with_limit(proj_str, ctx.limits.max_expression_tokens)?;
+                    let projection = parse_projection(&proj_tokens)?;
+                    let maps =
+                        build_expression_maps(tgi.get.expression_attribute_names.as_ref(), None);
+                    Some(apply_projection(&item, &projection, &maps)?)
+                }
+                (item, _) => item,
+            };
+            Ok(ItemResponse { item })
+        })
+        .collect::<Result<Vec<_>, DynamoDbError>>()?;
+
+    let consumed_capacity = capacity_helpers::batch_read_capacity(
+        input.return_consumed_capacity,
+        per_table_rcu.iter().map(|(t, cu)| (t.as_str(), *cu)),
+    );
+
+    let output = TransactGetItemsOutput {
+        responses,
+        consumed_capacity,
+    };
+    let body = serialize_output(&output)?;
+    Ok(DispatchResult {
+        body,
+        metrics: DispatchMetrics {
+            read_capacity_units: rcu,
+            returned_item_count: returned_count,
+            returned_bytes: total_pre_proj_bytes as u64,
+            ..Default::default()
+        },
+    })
+}

@@ -1,0 +1,26 @@
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Rust integration tests for extenddb — mirrors the external Java test suite.
+# This crate is NOT part of the workspace; it is a standalone test client
+# (tenet 6: tests live outside the core).
+[package]
+name = "extenddb-integration-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Empty workspace table — this crate is intentionally NOT part of the
+# product workspace (tenet 6: tests live outside the core).
+[workspace]
+
+[dependencies]
+aws-sdk-dynamodb = { path = "../../../aws-sdk-rust/sdk/dynamodb" }
+aws-config = { path = "../../../aws-sdk-rust/sdk/aws-config", features = ["behavior-version-latest"] }
+aws-credential-types = { path = "../../../aws-sdk-rust/sdk/aws-credential-types" }
+aws-smithy-types = { path = "../../../aws-sdk-rust/sdk/aws-smithy-types" }
+aws-smithy-runtime-api = { path = "../../../aws-sdk-rust/sdk/aws-smithy-runtime-api" }
+aws-smithy-http-client = { path = "../../../aws-sdk-rust/sdk/aws-smithy-http-client", features = ["rustls-ring"] }
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.12.15", features = ["rustls-tls", "json"], default-features = false }

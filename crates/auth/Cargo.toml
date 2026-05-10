@@ -1,0 +1,24 @@
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "extenddb-auth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+extenddb-core = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+axum = { workspace = true }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+serde_json = { workspace = true }
+time = { workspace = true }
+tracing = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
