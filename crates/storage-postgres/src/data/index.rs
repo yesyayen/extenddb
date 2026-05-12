@@ -124,8 +124,7 @@ pub(super) fn effective_delay(idx: &IndexMeta, system_default: u64) -> u64 {
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn sync_indexes(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    account_id: &str,
-    table_name: &str,
+    table_id: &str,
     base_key_schema: &[KeySchemaElement],
     attr_defs: &[AttributeDefinition],
     indexes: &[IndexMeta],
@@ -137,7 +136,7 @@ pub(crate) async fn sync_indexes(
         if effective_delay(idx, system_default_delay) != 0 {
             continue; // Async — handled after commit.
         }
-        let idx_table = index_table_name(account_id, table_name, &idx.index_name);
+        let idx_table = index_table_name(table_id, &idx.index_name);
         let idx_sks = all_sort_key_info(&idx.key_schema, attr_defs);
         let base_sks = all_sort_key_info(base_key_schema, attr_defs);
 
@@ -182,6 +181,7 @@ pub(crate) async fn enqueue_async_indexes(
     pk_hash: u64,
     account_id: &str,
     table_name: &str,
+    table_id: &str,
     base_key_schema: &[KeySchemaElement],
     attr_defs: &[AttributeDefinition],
     indexes: &[IndexMeta],
@@ -199,6 +199,7 @@ pub(crate) async fn enqueue_async_indexes(
                 pk_hash,
                 account_id,
                 table_name,
+                table_id,
                 base_key_schema,
                 attr_defs,
                 &idx.index_name,

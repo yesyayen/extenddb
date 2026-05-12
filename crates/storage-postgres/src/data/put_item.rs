@@ -26,7 +26,7 @@ impl PostgresEngine {
         maps: &ExpressionMaps,
         stream: Option<&StreamCapture>,
     ) -> Result<Option<Item>, StorageError> {
-        let ddb_table = data_table_name(&key_info.account_id, &key_info.table_name);
+        let ddb_table = data_table_name(&key_info.table_id);
 
         let pk_text = composite_pk_to_text(&item, &key_info.key_schema)?;
 
@@ -103,8 +103,7 @@ impl PostgresEngine {
                         .transpose()?;
                     sync_indexes(
                         &mut tx,
-                        &key_info.account_id,
-                        &key_info.table_name,
+                        &key_info.table_id,
                         &key_info.key_schema,
                         &key_info.attribute_definitions,
                         &indexes,
@@ -144,6 +143,7 @@ impl PostgresEngine {
                         pk_hash(pk_text.as_str()),
                         &key_info.account_id,
                         &key_info.table_name,
+                        &key_info.table_id,
                         &key_info.key_schema,
                         &key_info.attribute_definitions,
                         &indexes,
@@ -230,8 +230,7 @@ impl PostgresEngine {
                         .transpose()?;
                     sync_indexes(
                         &mut tx,
-                        &key_info.account_id,
-                        &key_info.table_name,
+                        &key_info.table_id,
                         &key_info.key_schema,
                         &key_info.attribute_definitions,
                         &indexes,
@@ -271,6 +270,7 @@ impl PostgresEngine {
                         pk_hash(pk_text.as_str()),
                         &key_info.account_id,
                         &key_info.table_name,
+                        &key_info.table_id,
                         &key_info.key_schema,
                         &key_info.attribute_definitions,
                         &indexes,
@@ -308,7 +308,7 @@ impl PostgresEngine {
         key_info: &TableKeyInfo,
         key: &Item,
     ) -> Result<Option<Item>, StorageError> {
-        let ddb_table = data_table_name(&key_info.account_id, &key_info.table_name);
+        let ddb_table = data_table_name(&key_info.table_id);
 
         let pk_name = &key_info.key_schema[0].attribute_name;
         let pk_value = key

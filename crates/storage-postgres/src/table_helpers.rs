@@ -46,11 +46,10 @@ pub(crate) struct IndexRow {
 impl PostgresEngine {
     /// SQL table name for a GSI data table (static version for use outside `data` module).
     pub(crate) fn index_table_name_static(
-        account_id: &str,
-        table_name: &str,
+        table_id: &str,
         index_name: &str,
     ) -> String {
-        data::index_table_name(account_id, table_name, index_name)
+        data::index_table_name(table_id, index_name)
     }
 
     /// Backfill existing items from the base table into a newly created GSI.
@@ -63,8 +62,7 @@ impl PostgresEngine {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn backfill_gsi(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        account_id: &str,
-        table_name: &str,
+        table_id: &str,
         index_name: &str,
         index_key_schema: &[KeySchemaElement],
         attr_defs: &[AttributeDefinition],
@@ -74,8 +72,8 @@ impl PostgresEngine {
     ) -> Result<(), StorageError> {
         const BATCH_SIZE: i64 = 500;
 
-        let base_table = data::data_table_name(account_id, table_name);
-        let idx_table = data::index_table_name(account_id, table_name, index_name);
+        let base_table = data::data_table_name(table_id);
+        let idx_table = data::index_table_name(table_id, index_name);
 
         let idx_sks = data::all_sort_key_info(index_key_schema, attr_defs);
         let base_sks = data::all_sort_key_info(base_key_schema, base_attr_defs);

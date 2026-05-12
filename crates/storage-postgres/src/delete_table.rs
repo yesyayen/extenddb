@@ -97,10 +97,10 @@ impl PostgresEngine {
                 .await
                 .map_err(|e| StorageError::Internal(e.to_string()))?;
             for idx_name in &index_names {
-                Self::drop_index_data_table(&mut data_tx, account_id, &input.table_name, idx_name)
+                Self::drop_index_data_table(&mut data_tx, &row.table_id, idx_name)
                     .await?;
             }
-            Self::drop_data_table(&mut data_tx, account_id, &input.table_name).await?;
+            Self::drop_data_table(&mut data_tx, &row.table_id).await?;
             data_tx
                 .commit()
                 .await

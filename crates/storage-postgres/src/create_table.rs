@@ -217,8 +217,7 @@ impl PostgresEngine {
 
             Self::create_data_table(
                 &mut data_tx,
-                account_id,
-                &input.table_name,
+                &table_id,
                 &input.key_schema,
                 &input.attribute_definitions,
             )
@@ -228,8 +227,7 @@ impl PostgresEngine {
                 for gsi in gsis {
                     Self::create_index_data_table(
                         &mut data_tx,
-                        account_id,
-                        &input.table_name,
+                        &table_id,
                         &gsi.index_name,
                         &gsi.key_schema,
                         &input.attribute_definitions,
@@ -243,8 +241,7 @@ impl PostgresEngine {
                 for lsi in lsis {
                     Self::create_index_data_table(
                         &mut data_tx,
-                        account_id,
-                        &input.table_name,
+                        &table_id,
                         &lsi.index_name,
                         &lsi.key_schema,
                         &input.attribute_definitions,

@@ -266,8 +266,7 @@ impl PostgresEngine {
 
                         Self::create_index_data_table(
                             &mut data_tx,
-                            account_id,
-                            &input.table_name,
+                            &table_id,
                             &create.index_name,
                             &create.key_schema,
                             effective_attr_defs,
@@ -278,8 +277,7 @@ impl PostgresEngine {
 
                         Self::backfill_gsi(
                             &mut data_tx,
-                            account_id,
-                            &input.table_name,
+                            &table_id,
                             &create.index_name,
                             &create.key_schema,
                             effective_attr_defs,
@@ -319,8 +317,7 @@ impl PostgresEngine {
 
                 if let Some(delete) = &update.delete {
                     let idx_table = Self::index_table_name_static(
-                        account_id,
-                        &input.table_name,
+                        &table_id,
                         &delete.index_name,
                     );
                     if let Err(e) = sqlx::query(&format!("DROP TABLE IF EXISTS {idx_table}"))
