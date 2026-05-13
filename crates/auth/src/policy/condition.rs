@@ -126,16 +126,46 @@ fn unwrap_if_exists(op: &ConditionOperator) -> (bool, &ConditionOperator) {
 ///
 /// For single-valued keys, `context_values` has one element.
 /// For multi-valued keys (e.g., `dynamodb:LeadingKeys`), all context values
-/// must satisfy the condition (implicit AND). Each context value must match
-/// at least one policy value (implicit OR within a condition key).
+/// must satisfy the condition (implicit AND).
+///
+/// For positive operators (StringEquals, NumericEquals, etc.): each context
+/// value must match at least one policy value (OR semantics — "value in set").
+///
+/// For negative operators (StringNotEquals, NumericNotEquals, etc.): each
+/// context value must satisfy the negative comparison against ALL policy
+/// values (AND semantics — "value not in set"). This matches AWS IAM behavior
+/// where `StringNotEquals` with `["a", "b"]` means "value is neither a nor b".
 fn evaluate_single_value_condition(
     op: &ConditionOperator,
     context_values: &[&str],
     policy_values: &[String],
 ) -> bool {
-    context_values
-        .iter()
-        .all(|cv| policy_values.iter().any(|pv| compare_single(op, cv, pv)))
+    if is_negative_operator(op) {
+        // Negative operators: context value must not match ANY policy value.
+        // Equivalent to: for each context value, ALL policy values must fail
+        // the positive comparison.
+        context_values
+            .iter()
+            .all(|cv| policy_values.iter().all(|pv| compare_single(op, cv, pv)))
+    } else {
+        // Positive operators: context value must match at least one policy value.
+        context_values
+            .iter()
+            .all(|cv| policy_values.iter().any(|pv| compare_single(op, cv, pv)))
+    }
+}
+
+/// Returns true for negative/negating condition operators.
+fn is_negative_operator(op: &ConditionOperator) -> bool {
+    matches!(
+        op,
+        ConditionOperator::StringNotEquals
+            | ConditionOperator::NumericNotEquals
+            | ConditionOperator::DateNotEquals
+            | ConditionOperator::StringNotLike
+            | ConditionOperator::ArnNotEquals
+            | ConditionOperator::ArnNotLike
+    )
 }
 
 /// Compare a single context value against a single policy value.
@@ -659,6 +689,74 @@ mod tests {
         let ctx = TestContext::new().with("k", vec!["a", "c"]);
         assert!(!evaluate_condition(
             &cond(ConditionOperator::StringEquals, "k", vec!["a", "b"]),
+            &ctx
+        ));
+    }
+
+    // --- Negative operators with multiple policy values ---
+
+    #[test]
+    fn string_not_equals_single_policy_value() {
+        let ctx = TestContext::new().with("k", vec!["admin"]);
+        // "admin" == "admin", so StringNotEquals should be false
+        assert!(!evaluate_condition(
+            &cond(ConditionOperator::StringNotEquals, "k", vec!["admin"]),
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn string_not_equals_multiple_policy_values_match() {
+        let ctx = TestContext::new().with("k", vec!["admin"]);
+        // "admin" is in {"admin", "root"}, so StringNotEquals should be false
+        assert!(!evaluate_condition(
+            &cond(
+                ConditionOperator::StringNotEquals,
+                "k",
+                vec!["admin", "root"]
+            ),
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn string_not_equals_multiple_policy_values_no_match() {
+        let ctx = TestContext::new().with("k", vec!["user"]);
+        // "user" is NOT in {"admin", "root"}, so StringNotEquals should be true
+        assert!(evaluate_condition(
+            &cond(
+                ConditionOperator::StringNotEquals,
+                "k",
+                vec!["admin", "root"]
+            ),
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn string_not_like_multiple_policy_values() {
+        let ctx = TestContext::new().with("k", vec!["hello-world"]);
+        // "hello-world" matches "hello-*", so StringNotLike should be false
+        assert!(!evaluate_condition(
+            &cond(
+                ConditionOperator::StringNotLike,
+                "k",
+                vec!["hello-*", "foo-*"]
+            ),
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn string_not_like_multiple_policy_values_no_match() {
+        let ctx = TestContext::new().with("k", vec!["bar-baz"]);
+        // "bar-baz" matches neither "hello-*" nor "foo-*"
+        assert!(evaluate_condition(
+            &cond(
+                ConditionOperator::StringNotLike,
+                "k",
+                vec!["hello-*", "foo-*"]
+            ),
             &ctx
         ));
     }
