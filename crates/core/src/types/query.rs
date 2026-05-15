@@ -41,7 +41,7 @@ impl<'de> Deserialize<'de> for Select {
             other => Err(serde::de::Error::custom(format!(
                 "1 validation error detected: Value '{other}' at 'select' \
                  failed to satisfy constraint: Member must satisfy enum value set: \
-                 [ALL_ATTRIBUTES, ALL_PROJECTED_ATTRIBUTES, SPECIFIC_ATTRIBUTES, COUNT]"
+                 [SPECIFIC_ATTRIBUTES, COUNT, ALL_ATTRIBUTES, ALL_PROJECTED_ATTRIBUTES]"
             ))),
         }
     }

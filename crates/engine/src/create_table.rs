@@ -14,7 +14,22 @@ pub async fn handle_create_table<S: TableEngine>(
     body: Value,
     ctx: &OperationContext<S>,
 ) -> Result<Value, DynamoDbError> {
-    let input: CreateTableInput = serde_json::from_value(body).map_err(crate::deserialize_error)?;
+    let input: CreateTableInput = serde_json::from_value(body).map_err(|e| {
+        let msg = e.to_string();
+        if msg.contains("validation error detected")
+            || msg.contains("parameter values were invalid")
+        {
+            DynamoDbError::ValidationException(msg)
+        } else if msg.contains("missing field") && msg.contains("TableName") {
+            DynamoDbError::ValidationException(
+                "The parameter 'TableName' is required but was not present in the request".to_owned()
+            )
+        } else {
+            DynamoDbError::SerializationException(format!(
+                "Start of structure or map found where not expected: {e}"
+            ))
+        }
+    })?;
 
     validate_create_table(&input, &ctx.limits)?;
 
