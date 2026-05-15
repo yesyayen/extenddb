@@ -14,6 +14,10 @@ pub async fn handle_create_table<S: TableEngine>(
     body: Value,
     ctx: &OperationContext<S>,
 ) -> Result<Value, DynamoDbError> {
+    crate::validate_enum_fields(&body, &[
+        ("BillingMode", "billingMode", &["PROVISIONED", "PAY_PER_REQUEST"]),
+    ])?;
+
     let input: CreateTableInput = serde_json::from_value(body).map_err(|e| {
         let msg = e.to_string();
         if msg.contains("validation error detected")
