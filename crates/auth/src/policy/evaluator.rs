@@ -10,7 +10,7 @@
 use super::condition::evaluate_condition;
 use super::context::ConditionContext;
 use super::document::{ActionMatch, Effect, PolicyDocument, ResourceMatch, Statement};
-use super::matcher::{arn_match, wildcard_match};
+use super::matcher::{arn_match, wildcard_match_ignore_case};
 
 /// The result of policy evaluation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,14 +109,15 @@ pub fn evaluate_policies(
 }
 
 /// Check if the request action matches the statement's action constraint.
+/// Action matching is case-insensitive per AWS IAM specification.
 fn action_matches(statement: &Statement, request_action: &str) -> bool {
     match &statement.action_match {
-        ActionMatch::Actions(patterns) => {
-            patterns.iter().any(|p| wildcard_match(p, request_action))
-        }
-        ActionMatch::NotActions(patterns) => {
-            !patterns.iter().any(|p| wildcard_match(p, request_action))
-        }
+        ActionMatch::Actions(patterns) => patterns
+            .iter()
+            .any(|p| wildcard_match_ignore_case(p, request_action)),
+        ActionMatch::NotActions(patterns) => !patterns
+            .iter()
+            .any(|p| wildcard_match_ignore_case(p, request_action)),
     }
 }
 
@@ -228,6 +229,53 @@ mod tests {
         let deny = parse(
             r#"{"Version":"2012-10-17","Statement":[{
                 "Effect":"Deny","Action":"dynamodb:DeleteTable","Resource":"*"
+            }]}"#,
+        );
+        assert_eq!(
+            evaluate_policies(
+                &[allow, deny],
+                None,
+                None,
+                "dynamodb:DeleteTable",
+                "arn:aws:dynamodb:us-east-1:123:table/T",
+                &Ctx::empty()
+            ),
+            AuthzDecision::Deny
+        );
+    }
+
+    // --- Case-insensitive action matching ---
+
+    #[test]
+    fn action_matching_is_case_insensitive() {
+        let policy = parse(
+            r#"{"Version":"2012-10-17","Statement":[{
+                "Effect":"Allow","Action":"dynamodb:putitem","Resource":"*"
+            }]}"#,
+        );
+        assert_eq!(
+            evaluate_policies(
+                &[policy],
+                None,
+                None,
+                "dynamodb:PutItem",
+                "arn:aws:dynamodb:us-east-1:123:table/T",
+                &Ctx::empty()
+            ),
+            AuthzDecision::Allow
+        );
+    }
+
+    #[test]
+    fn deny_case_insensitive() {
+        let allow = parse(
+            r#"{"Version":"2012-10-17","Statement":[{
+                "Effect":"Allow","Action":"dynamodb:*","Resource":"*"
+            }]}"#,
+        );
+        let deny = parse(
+            r#"{"Version":"2012-10-17","Statement":[{
+                "Effect":"Deny","Action":"dynamodb:deletetable","Resource":"*"
             }]}"#,
         );
         assert_eq!(

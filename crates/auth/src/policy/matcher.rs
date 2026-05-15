@@ -8,10 +8,11 @@
 //! with `*` in a segment matching any value for that segment.
 
 /// Match a pattern against a value. Supports `*` and `?` wildcards.
+/// Comparison is case-sensitive.
 ///
 /// Uses a greedy algorithm with O(1) heap allocation.
 ///
-/// Used for Action matching and `StringLike` condition evaluation.
+/// Used for `StringLike` condition evaluation (case-sensitive per AWS IAM).
 ///
 /// # Examples
 ///
@@ -23,8 +24,27 @@
 /// assert!(wildcard_match("s?s", "sis"));
 /// ```
 pub fn wildcard_match(pattern: &str, value: &str) -> bool {
-    let p = pattern.as_bytes();
-    let v = value.as_bytes();
+    wildcard_match_impl(pattern.as_bytes(), value.as_bytes(), false)
+}
+
+/// Match a pattern against a value with case-insensitive comparison.
+/// Supports `*` and `?` wildcards.
+///
+/// Used for Action matching (case-insensitive per AWS IAM).
+///
+/// # Examples
+///
+/// ```
+/// # use extenddb_auth::policy::matcher::wildcard_match_ignore_case;
+/// assert!(wildcard_match_ignore_case("dynamodb:getitem", "dynamodb:GetItem"));
+/// assert!(wildcard_match_ignore_case("dynamodb:Get*", "dynamodb:getitem"));
+/// assert!(!wildcard_match_ignore_case("dynamodb:Get*", "dynamodb:PutItem"));
+/// ```
+pub fn wildcard_match_ignore_case(pattern: &str, value: &str) -> bool {
+    wildcard_match_impl(pattern.as_bytes(), value.as_bytes(), true)
+}
+
+fn wildcard_match_impl(p: &[u8], v: &[u8], ignore_case: bool) -> bool {
     let (plen, vlen) = (p.len(), v.len());
 
     let mut pi = 0; // pattern index
@@ -33,13 +53,20 @@ pub fn wildcard_match(pattern: &str, value: &str) -> bool {
     let mut match_from = 0; // value index when last '*' was hit
 
     while vi < vlen {
-        if pi < plen && (p[pi] == b'?' || p[pi] == v[vi]) {
-            pi += 1;
-            vi += 1;
-        } else if pi < plen && p[pi] == b'*' {
+        if pi < plen && p[pi] == b'*' {
             last_star = pi + 1;
             match_from = vi;
             pi += 1;
+        } else if pi < plen
+            && (p[pi] == b'?'
+                || if ignore_case {
+                    p[pi].to_ascii_lowercase() == v[vi].to_ascii_lowercase()
+                } else {
+                    p[pi] == v[vi]
+                })
+        {
+            pi += 1;
+            vi += 1;
         } else if last_star != usize::MAX {
             // Backtrack: let the last '*' consume one more character.
             match_from += 1;
@@ -138,6 +165,39 @@ mod tests {
     #[test]
     fn no_match() {
         assert!(!wildcard_match("dynamodb:Get*", "dynamodb:PutItem"));
+    }
+
+    #[test]
+    fn case_sensitive() {
+        assert!(!wildcard_match("dynamodb:getitem", "dynamodb:GetItem"));
+    }
+
+    // --- wildcard_match_ignore_case ---
+
+    #[test]
+    fn ignore_case_exact() {
+        assert!(wildcard_match_ignore_case(
+            "dynamodb:getitem",
+            "dynamodb:GetItem"
+        ));
+        assert!(wildcard_match_ignore_case(
+            "dynamodb:PUTITEM",
+            "dynamodb:PutItem"
+        ));
+    }
+
+    #[test]
+    fn ignore_case_wildcard() {
+        assert!(wildcard_match_ignore_case("dynamodb:get*", "dynamodb:GetItem"));
+        assert!(wildcard_match_ignore_case("DYNAMODB:*", "dynamodb:PutItem"));
+    }
+
+    #[test]
+    fn ignore_case_no_match() {
+        assert!(!wildcard_match_ignore_case(
+            "dynamodb:get*",
+            "dynamodb:PutItem"
+        ));
     }
 
     #[test]
