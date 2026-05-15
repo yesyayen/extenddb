@@ -66,6 +66,16 @@ impl PreparedOp {
         }
     }
 
+    /// Approximate item size for transaction size limit enforcement.
+    pub(crate) fn item_size(&self) -> usize {
+        match self {
+            Self::Put { item, .. } => extenddb_core::types::item_size_bytes(item),
+            Self::Delete { key, .. } | Self::Update { key, .. } | Self::ConditionCheck { key, .. } => {
+                extenddb_core::types::item_size_bytes(key)
+            }
+        }
+    }
+
     /// Canonical `"table_name:{json_key}"` string for duplicate-target detection.
     ///
     /// Uses JSON serialization of the extracted key (`BTreeMap` guarantees sorted
@@ -189,7 +199,7 @@ pub(crate) fn parse_optional_condition(
     match expr {
         Some(s) if !s.is_empty() => {
             let tokens =
-                extenddb_core::expression::tokenize_with_limit(s, limits.max_expression_tokens)?;
+                crate::expression_helpers::tokenize_expression(s, limits)?;
             let ast = extenddb_core::expression::parse_condition_with_depth_limit(
                 &tokens,
                 limits.max_expression_depth,
@@ -268,7 +278,7 @@ pub(crate) fn validate_no_key_updates(
             for ks in &key_info.key_schema {
                 if ks.attribute_name == resolved {
                     return Err(DynamoDbError::ValidationException(format!(
-                        "One or more parameter values are not valid. Cannot update attribute {}. \
+                        "One or more parameter values were invalid: Cannot update attribute {}. \
                          This attribute is part of the key",
                         ks.attribute_name
                     )));

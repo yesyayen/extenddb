@@ -94,16 +94,29 @@ pub(crate) fn build_sk_sql(
             SkSqlInfo { fragment: frag }
         }
         SortKeyCondition::BeginsWith { .. } => {
-            // For string sort keys, use >= prefix AND < prefix+1 pattern.
-            // chr(1114111) is the max Unicode code point; with COLLATE "C"
-            // (byte order), prefix || chr(1114111) is strictly greater than
-            // any string starting with prefix.
-            let frag = format!(
-                " AND {sk_col}{collate} >= ${p} AND {sk_col}{collate} < (${p} || chr(1114111))",
-                p = *param_idx
-            );
-            *param_idx += 1;
-            SkSqlInfo { fragment: frag }
+            let is_binary = sk_col == "sk_b" || sk_col.ends_with("_b");
+            if is_binary {
+                // For binary sort keys, bind both prefix and incremented-prefix
+                // as separate parameters. The upper bound is computed in Rust
+                // (see bind_sk_condition) by incrementing the prefix bytes.
+                let frag = format!(
+                    " AND {sk_col} >= ${lo} AND {sk_col} < ${hi}",
+                    lo = *param_idx,
+                    hi = *param_idx + 1
+                );
+                *param_idx += 2;
+                SkSqlInfo { fragment: frag }
+            } else {
+                // For string sort keys, append the max Unicode code point.
+                // With COLLATE "C" (byte order), prefix || chr(1114111) is
+                // strictly greater than any string starting with prefix.
+                let frag = format!(
+                    " AND {sk_col}{collate} >= ${p} AND {sk_col}{collate} < (${p} || chr(1114111))",
+                    p = *param_idx
+                );
+                *param_idx += 1;
+                SkSqlInfo { fragment: frag }
+            }
         }
     }
 }
@@ -169,11 +182,26 @@ fn bind_sk_condition<'q>(
     StorageError,
 > {
     match sk_cond {
-        SortKeyCondition::Compare { value, .. }
-        | SortKeyCondition::BeginsWith { prefix: value, .. } => {
+        SortKeyCondition::Compare { value, .. } => {
             let av = resolve_expr_to_av(value, maps)?;
             let sk = parse_sk(&av, sk_type)?;
             Ok(bind_sk_value(query, &sk))
+        }
+        SortKeyCondition::BeginsWith { prefix: value, .. } => {
+            let av = resolve_expr_to_av(value, maps)?;
+            let sk = parse_sk(&av, sk_type)?;
+            if sk_type == ScalarAttributeType::B {
+                // Binary begins_with: bind prefix and incremented prefix.
+                let prefix_bytes = match &sk {
+                    SortKeyValue::B(b) => b.clone(),
+                    _ => unreachable!(),
+                };
+                let upper = increment_bytes(&prefix_bytes);
+                let q = bind_sk_value(query, &sk);
+                Ok(q.bind(upper))
+            } else {
+                Ok(bind_sk_value(query, &sk))
+            }
         }
         SortKeyCondition::Between { low, high, .. } => {
             let lo_av = resolve_expr_to_av(low, maps)?;
@@ -184,6 +212,23 @@ fn bind_sk_condition<'q>(
             Ok(bind_sk_value(q, &hi_sk))
         }
     }
+}
+
+/// Compute the exclusive upper bound for a binary prefix range query.
+///
+/// Increments the last non-0xFF byte and truncates trailing 0xFF bytes.
+/// If the prefix is all 0xFF, returns a 1025-byte all-0xFF vector (longer
+/// than any valid DynamoDB sort key, so `< upper` is always true).
+fn increment_bytes(prefix: &[u8]) -> Vec<u8> {
+    let mut result = prefix.to_vec();
+    for i in (0..result.len()).rev() {
+        if result[i] < 0xFF {
+            result[i] += 1;
+            return result;
+        }
+        result.pop();
+    }
+    vec![0xFF; 1025]
 }
 
 /// Bind a single `SortKeyValue` to a query.

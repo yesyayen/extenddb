@@ -3,10 +3,12 @@
 
 //! `TransactGetItems` operation handler.
 
+use std::collections::HashSet;
+
 use serde_json::Value;
 
 use extenddb_core::error::DynamoDbError;
-use extenddb_core::expression::{apply_projection, parse_projection, tokenize_with_limit};
+use extenddb_core::expression::{apply_projection, parse_projection, tokenize_for};
 use extenddb_core::types::{
     ItemResponse, TransactGetItemsInput, TransactGetItemsOutput, item_size_bytes,
 };
@@ -34,25 +36,34 @@ pub async fn handle_transact_get_items<S: TableEngine + DataEngine>(
     body: Value,
     ctx: &OperationContext<S>,
 ) -> Result<DispatchResult, DynamoDbError> {
-    let input: TransactGetItemsInput = serde_json::from_value(body).map_err(|e| {
-        DynamoDbError::SerializationException(format!(
-            "Start of structure or map found where not expected: {e}"
-        ))
-    })?;
+    let input: TransactGetItemsInput = serde_json::from_value(body).map_err(crate::deserialize_error)?;
 
     if input.transact_items.is_empty() {
         return Err(DynamoDbError::ValidationException(
-            "1 validation error detected: Value null at 'transactItems' failed to satisfy constraint: Member must not be null".to_owned(),
+            "1 validation error detected: Value '[]' at 'transactItems' failed to satisfy constraint: Member must have length greater than or equal to 1".to_owned(),
         ));
     }
 
     if input.transact_items.len() > MAX_TRANSACT_GET_ITEMS {
         return Err(DynamoDbError::ValidationException(
-            "Member must have length less than or equal to 100".to_owned(),
+            format!(
+                "1 validation error detected: Value '[{}]' at 'transactItems' failed to satisfy constraint: Member must have length less than or equal to 100",
+                input.transact_items.iter().map(|_| "TransactGetItem").collect::<Vec<_>>().join(", ")
+            ),
         ));
     }
 
     // Resolve table key info for each item
+    let mut seen_keys: HashSet<Vec<u8>> = HashSet::with_capacity(input.transact_items.len());
+    for tgi in &input.transact_items {
+        let dedup_key = serde_json::to_vec(&(&tgi.get.table_name, &tgi.get.key)).unwrap_or_default();
+        if !seen_keys.insert(dedup_key) {
+            return Err(DynamoDbError::ValidationException(
+                "Transaction request cannot include multiple operations on one item".to_owned(),
+            ));
+        }
+    }
+
     let mut key_infos = Vec::with_capacity(input.transact_items.len());
     for tgi in &input.transact_items {
         let key_info = ctx
@@ -109,18 +120,35 @@ pub async fn handle_transact_get_items<S: TableEngine + DataEngine>(
         .into_iter()
         .zip(input.transact_items.iter())
         .map(|(opt, tgi)| {
-            let item = match (opt, tgi.get.projection_expression.as_deref()) {
-                (Some(item), Some(proj_str)) => {
-                    let proj_tokens =
-                        tokenize_with_limit(proj_str, ctx.limits.max_expression_tokens)?;
-                    let projection = parse_projection(&proj_tokens)?;
-                    let maps =
-                        build_expression_maps(tgi.get.expression_attribute_names.as_ref(), None);
-                    Some(apply_projection(&item, &projection, &maps)?)
+            let maps =
+                build_expression_maps(tgi.get.expression_attribute_names.as_ref(), None);
+            if let Some(ref proj_str) = tgi.get.projection_expression {
+                let proj_tokens =
+                    tokenize_for(proj_str, ctx.limits.max_expression_tokens, "ProjectionExpression")?;
+                let projection = parse_projection(&proj_tokens)?;
+                let mut extra_names = std::collections::HashSet::new();
+                for path in &projection {
+                    for el in path {
+                        if let extenddb_core::expression::PathElement::Attribute(name) = el {
+                            if let Some(ref_name) = name.strip_prefix('#') {
+                                extra_names.insert(ref_name.to_owned());
+                            }
+                        }
+                    }
                 }
-                (item, _) => item,
-            };
-            Ok(ItemResponse { item })
+                extenddb_core::expression::validate_unused_attributes(
+                    &maps.names, &maps.values, &[], &[],
+                    &extra_names, &std::collections::HashSet::new(),
+                )?;
+                let item = opt.map(|item| apply_projection(&item, &projection, &maps)).transpose()?;
+                Ok(ItemResponse { item })
+            } else {
+                extenddb_core::expression::validate_unused_attributes(
+                    &maps.names, &maps.values, &[], &[],
+                    &std::collections::HashSet::new(), &std::collections::HashSet::new(),
+                )?;
+                Ok(ItemResponse { item: opt })
+            }
         })
         .collect::<Result<Vec<_>, DynamoDbError>>()?;
 

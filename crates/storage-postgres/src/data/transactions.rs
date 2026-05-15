@@ -396,9 +396,15 @@ async fn execute_transact_write_op(
                 .await
                 .map_err(TxnOpError::Storage)?;
             let mut item = existing.clone().unwrap_or_else(|| (*key).clone());
+            // Evaluate condition against empty item if non-existent (DynamoDB semantics)
+            let condition_item = if existing.is_some() {
+                &item
+            } else {
+                &std::collections::BTreeMap::new()
+            };
             eval_condition(
                 *condition,
-                &item,
+                condition_item,
                 maps,
                 *return_values_on_ccf,
                 existing.as_ref(),

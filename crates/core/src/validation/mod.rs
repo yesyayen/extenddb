@@ -1,5 +1,7 @@
 // Copyright 2026 ExtendDB contributors
 // SPDX-License-Identifier: Apache-2.0
+pub mod number;
+
 use crate::error::{DynamoDbError, ErrorMessageKey, error_message};
 use crate::limits::LimitsConfig;
 use crate::types::{
@@ -11,10 +13,22 @@ use crate::types::{
 /// Validate a table name per Virtual `DynamoDB` rules.
 /// REQ-LIM-020: 3-255 chars. REQ-LIM-021: [a-zA-Z0-9_.-]
 pub fn validate_table_name(name: &str, limits: &LimitsConfig) -> Result<(), DynamoDbError> {
-    if name.len() < limits.min_table_name_length || name.len() > limits.max_table_name_length {
+    if name.is_empty() {
+        return Err(DynamoDbError::ValidationException(error_message(
+            ErrorMessageKey::TableNameEmpty,
+            &[],
+        )));
+    }
+    if name.len() < limits.min_table_name_length {
         return Err(DynamoDbError::ValidationException(error_message(
             ErrorMessageKey::TableNameTooShort,
-            &[],
+            &[name],
+        )));
+    }
+    if name.len() > limits.max_table_name_length {
+        return Err(DynamoDbError::ValidationException(error_message(
+            ErrorMessageKey::TableNameTooLong,
+            &[name],
         )));
     }
     validate_table_name_chars(name)?;
@@ -85,7 +99,27 @@ pub fn validate_create_table(
     validate_gsi_provisioned_throughput(input)?;
     validate_gsi_count(input, limits)?;
     validate_lsi_count(input, limits)?;
+    validate_lsi_requires_range_key(input)?;
+    validate_unique_index_names(input)?;
     Ok(())
+}
+
+/// Format KeySchema elements in DynamoDB's Java-toString style for error messages.
+fn format_key_schema_value(ks: &[KeySchemaElement]) -> String {
+    let elements: Vec<String> = ks
+        .iter()
+        .map(|e| {
+            let kt = match e.key_type {
+                KeyType::Hash => "HASH",
+                KeyType::Range => "RANGE",
+            };
+            format!(
+                "KeySchemaElement(attributeName={}, keyType={})",
+                e.attribute_name, kt
+            )
+        })
+        .collect();
+    format!("[{}]", elements.join(", "))
 }
 
 /// Maximum number of HASH or RANGE elements in a multi-part key schema.
@@ -113,15 +147,23 @@ fn validate_key_schema(
     } else {
         // Standard DynamoDB: 1 HASH + optional 1 RANGE
         if input.key_schema.len() > 2 {
-            return Err(DynamoDbError::ValidationException(error_message(
-                ErrorMessageKey::KeySchemaTooMany,
-                &[],
+            let ks_repr = format_key_schema_value(&input.key_schema);
+            return Err(DynamoDbError::ValidationException(format!(
+                "1 validation error detected: Value '{ks_repr}' at 'keySchema' failed to satisfy constraint: \
+                 Member must have length less than or equal to 2"
             )));
         }
-        if input.key_schema.len() == 2 && input.key_schema[1].key_type != KeyType::Range {
-            return Err(DynamoDbError::ValidationException(
-                "Second KeySchemaElement is not a RANGE type".to_owned(),
-            ));
+        if input.key_schema.len() == 2 {
+            if input.key_schema[1].key_type != KeyType::Range {
+                return Err(DynamoDbError::ValidationException(
+                    "Second KeySchemaElement is not a RANGE type".to_owned(),
+                ));
+            }
+            if input.key_schema[0].attribute_name == input.key_schema[1].attribute_name {
+                return Err(DynamoDbError::ValidationException(
+                    "Invalid KeySchema: Some index key attribute have no definition".to_owned(),
+                ));
+            }
         }
     }
     Ok(())
@@ -416,6 +458,7 @@ pub fn validate_put_item(
 
     validate_item_keys(&input.item, key_schema, attr_defs)?;
     validate_attribute_name_sizes(&input.item, limits)?;
+    validate_item_numbers(&input.item)?;
 
     let size = item_size_bytes(&input.item);
     if size > limits.max_item_size_bytes {
@@ -495,10 +538,9 @@ pub fn validate_update_item(
     validate_key_only(&input.key, key_schema, attr_defs)?;
 
     // Either UpdateExpression or AttributeUpdates must be provided.
-    let has_update_expr = input
-        .update_expression
-        .as_deref()
-        .is_some_and(|s| !s.trim().is_empty());
+    // Note: an empty string UpdateExpression is "provided" but will fail later
+    // with the correct "The expression can not be empty;" message from tokenize_for.
+    let has_update_expr = input.update_expression.is_some();
     let has_attr_updates = input
         .attribute_updates
         .as_ref()
@@ -578,7 +620,7 @@ pub fn validate_key_only(
     let expected_count = key_schema.len();
     if key.len() != expected_count {
         return Err(DynamoDbError::ValidationException(
-            "The number of conditions on the keys is invalid".to_owned(),
+            "The provided key element does not match the schema".to_owned(),
         ));
     }
 
@@ -689,6 +731,12 @@ pub fn validate_key_sizes(
 ) -> Result<(), DynamoDbError> {
     for ks in key_schema {
         if let Some(value) = item.get(&ks.attribute_name) {
+            if matches!(value, AttributeValue::S(s) if s.is_empty()) {
+                return Err(DynamoDbError::ValidationException(format!(
+                    "One or more parameter values are not valid. The AttributeValue for a key attribute cannot contain an empty string value. Key: {}",
+                    ks.attribute_name
+                )));
+            }
             let size = key_value_byte_size(value);
             let (max_size, key_label) = match ks.key_type {
                 KeyType::Hash => (limits.max_partition_key_size_bytes, "partition key"),
@@ -729,6 +777,82 @@ pub fn validate_item_size(item: &Item, max_bytes: usize) -> Result<(), DynamoDbE
         return Err(DynamoDbError::ValidationException(format!(
             "Item size has exceeded the maximum allowed size of {max_bytes}"
         )));
+    }
+    Ok(())
+}
+
+/// Validate all number values in an item are within DynamoDB limits.
+pub fn validate_item_numbers(item: &Item) -> Result<(), DynamoDbError> {
+    for value in item.values() {
+        validate_attribute_number(value)?;
+    }
+    Ok(())
+}
+
+fn validate_lsi_requires_range_key(input: &CreateTableInput) -> Result<(), DynamoDbError> {
+    let has_lsi = input
+        .local_secondary_indexes
+        .as_ref()
+        .is_some_and(|v| !v.is_empty());
+    if !has_lsi {
+        return Ok(());
+    }
+    let has_range = input.key_schema.len() >= 2
+        && input.key_schema[1].key_type == KeyType::Range;
+    if !has_range {
+        return Err(DynamoDbError::ValidationException(
+            "One or more parameter values were invalid: Table KeySchema does not have a range key, which is required when specifying a LocalSecondaryIndex".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_attribute_number(value: &AttributeValue) -> Result<(), DynamoDbError> {
+    match value {
+        AttributeValue::N(n) => {
+            number::validate_and_normalize_number(n)?;
+        }
+        AttributeValue::NS(set) => {
+            for n in set {
+                number::validate_and_normalize_number(n)?;
+            }
+        }
+        AttributeValue::L(list) => {
+            for v in list {
+                validate_attribute_number(v)?;
+            }
+        }
+        AttributeValue::M(map) => {
+            for v in map.values() {
+                validate_attribute_number(v)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn validate_unique_index_names(input: &CreateTableInput) -> Result<(), DynamoDbError> {
+    let mut names = std::collections::HashSet::new();
+    if let Some(gsis) = &input.global_secondary_indexes {
+        for gsi in gsis {
+            if !names.insert(&gsi.index_name) {
+                return Err(DynamoDbError::ValidationException(format!(
+                    "One or more parameter values were invalid: Duplicate index name: {}",
+                    gsi.index_name
+                )));
+            }
+        }
+    }
+    if let Some(lsis) = &input.local_secondary_indexes {
+        for lsi in lsis {
+            if !names.insert(&lsi.index_name) {
+                return Err(DynamoDbError::ValidationException(format!(
+                    "One or more parameter values were invalid: Duplicate index name: {}",
+                    lsi.index_name
+                )));
+            }
+        }
     }
     Ok(())
 }

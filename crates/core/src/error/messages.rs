@@ -4,11 +4,36 @@
 //! Error message templates captured from real DynamoDB.
 //! These are the exact messages DynamoDB returns — tenet 4 (errors are contracts).
 
+/// Format a single validation constraint error in DynamoDB's exact format.
+#[must_use]
+pub fn validation_error(value: &str, field: &str, constraint: &str) -> String {
+    format!(
+        "1 validation error detected: Value '{value}' at '{field}' failed to satisfy constraint: {constraint}"
+    )
+}
+
+/// Format multiple validation constraint errors in DynamoDB's exact format.
+#[must_use]
+pub fn validation_errors(errors: &[(&str, &str, &str)]) -> String {
+    let count = errors.len();
+    let details: Vec<String> = errors
+        .iter()
+        .map(|(value, field, constraint)| {
+            format!("Value '{value}' at '{field}' failed to satisfy constraint: {constraint}")
+        })
+        .collect();
+    format!("{count} validation error{} detected: {}",
+        if count == 1 { "" } else { "s" },
+        details.join("; "))
+}
+
 /// Keys for error message templates. Compile-time checked — no stringly-typed lookups.
 #[derive(Debug, Clone, Copy)]
 pub enum ErrorMessageKey {
     TableNameTooShort,
     TableNameTooLong,
+    TableNameNull,
+    TableNameEmpty,
     TableNameInvalidChars,
     TableNotFound,
     TableAlreadyExists,
@@ -27,9 +52,17 @@ pub enum ErrorMessageKey {
 #[must_use]
 pub fn error_message(key: ErrorMessageKey, args: &[&str]) -> String {
     match key {
-        ErrorMessageKey::TableNameTooShort | ErrorMessageKey::TableNameTooLong => {
-            "TableName must be at least 3 characters long and at most 255 characters long"
-                .to_owned()
+        ErrorMessageKey::TableNameTooShort => {
+            format!("1 validation error detected: Value '{}' at 'tableName' failed to satisfy constraint: Member must have length greater than or equal to 3", args[0])
+        }
+        ErrorMessageKey::TableNameTooLong => {
+            format!("1 validation error detected: Value '{}' at 'tableName' failed to satisfy constraint: Member must have length less than or equal to 255", args[0])
+        }
+        ErrorMessageKey::TableNameNull => {
+            "1 validation error detected: Value null at 'tableName' failed to satisfy constraint: Member must not be null".to_owned()
+        }
+        ErrorMessageKey::TableNameEmpty => {
+            "1 validation error detected: Value '' at 'tableName' failed to satisfy constraint: Member must have length greater than or equal to 1".to_owned()
         }
         ErrorMessageKey::TableNameInvalidChars => {
             format!(
@@ -39,7 +72,7 @@ pub fn error_message(key: ErrorMessageKey, args: &[&str]) -> String {
             )
         }
         ErrorMessageKey::TableNotFound => {
-            format!("Requested resource not found: Table: {} not found", args[0])
+            "Requested resource not found".to_owned()
         }
         ErrorMessageKey::TableAlreadyExists => {
             format!("Table already exists: {}", args[0])

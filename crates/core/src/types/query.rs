@@ -8,7 +8,17 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::capacity::{ConsumedCapacity, ReturnConsumedCapacity};
+use super::item::ConditionalOperator;
 use super::{AttributeValue, Item};
+
+/// Legacy condition used in `KeyConditions`, `QueryFilter`, and `ScanFilter`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Condition {
+    #[serde(rename = "ComparisonOperator")]
+    pub comparison_operator: String,
+    #[serde(rename = "AttributeValueList", default)]
+    pub attribute_value_list: Vec<AttributeValue>,
+}
 
 /// `Select` parameter — controls which attributes are returned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -31,7 +41,7 @@ impl<'de> Deserialize<'de> for Select {
             other => Err(serde::de::Error::custom(format!(
                 "1 validation error detected: Value '{other}' at 'select' \
                  failed to satisfy constraint: Member must satisfy enum value set: \
-                 [ALL_ATTRIBUTES, ALL_PROJECTED_ATTRIBUTES, SPECIFIC_ATTRIBUTES, COUNT]"
+                 [SPECIFIC_ATTRIBUTES, COUNT, ALL_ATTRIBUTES, ALL_PROJECTED_ATTRIBUTES]"
             ))),
         }
     }
@@ -67,6 +77,18 @@ pub struct QueryInput {
     /// Controls whether consumed capacity information is returned.
     #[serde(rename = "ReturnConsumedCapacity", default)]
     pub return_consumed_capacity: ReturnConsumedCapacity,
+    /// Legacy `KeyConditions` — desugared to `KeyConditionExpression`.
+    #[serde(rename = "KeyConditions")]
+    pub key_conditions: Option<HashMap<String, Condition>>,
+    /// Legacy `QueryFilter` — desugared to `FilterExpression`.
+    #[serde(rename = "QueryFilter")]
+    pub query_filter: Option<HashMap<String, Condition>>,
+    /// Legacy `AttributesToGet` — desugared to `ProjectionExpression`.
+    #[serde(rename = "AttributesToGet")]
+    pub attributes_to_get: Option<Vec<String>>,
+    /// Logical operator for combining multiple legacy filter conditions.
+    #[serde(rename = "ConditionalOperator")]
+    pub conditional_operator: Option<ConditionalOperator>,
 }
 
 fn default_true() -> bool {
@@ -119,6 +141,15 @@ pub struct ScanInput {
     /// Controls whether consumed capacity information is returned.
     #[serde(rename = "ReturnConsumedCapacity", default)]
     pub return_consumed_capacity: ReturnConsumedCapacity,
+    /// Legacy `ScanFilter` — desugared to `FilterExpression`.
+    #[serde(rename = "ScanFilter")]
+    pub scan_filter: Option<HashMap<String, Condition>>,
+    /// Legacy `AttributesToGet` — desugared to `ProjectionExpression`.
+    #[serde(rename = "AttributesToGet")]
+    pub attributes_to_get: Option<Vec<String>>,
+    /// Logical operator for combining multiple legacy filter conditions.
+    #[serde(rename = "ConditionalOperator")]
+    pub conditional_operator: Option<ConditionalOperator>,
 }
 
 /// `Scan` response body.

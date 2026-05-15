@@ -12,11 +12,26 @@ pub struct KeySchemaElement {
 }
 
 /// Key type — HASH (partition key) or RANGE (sort key).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum KeyType {
+    #[serde(rename = "HASH")]
     Hash,
+    #[serde(rename = "RANGE")]
     Range,
+}
+
+impl<'de> serde::Deserialize<'de> for KeyType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "HASH" => Ok(Self::Hash),
+            "RANGE" => Ok(Self::Range),
+            other => Err(serde::de::Error::custom(format!(
+                "1 validation error detected: Value '{other}' at 'keySchema.1.member.keyType' \
+                 failed to satisfy constraint: Member must satisfy enum value set: [HASH, RANGE]"
+            ))),
+        }
+    }
 }
 
 /// Attribute definition — maps an attribute name to a scalar type.
@@ -29,11 +44,26 @@ pub struct AttributeDefinition {
 }
 
 /// Scalar attribute type — only S, N, B are valid for key attributes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ScalarAttributeType {
     S,
     N,
     B,
+}
+
+impl<'de> serde::Deserialize<'de> for ScalarAttributeType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "S" => Ok(Self::S),
+            "N" => Ok(Self::N),
+            "B" => Ok(Self::B),
+            other => Err(serde::de::Error::custom(format!(
+                "1 validation error detected: Value '{other}' at 'attributeDefinitions.1.member.attributeType' \
+                 failed to satisfy constraint: Member must satisfy enum value set: [B, N, S]"
+            ))),
+        }
+    }
 }
 
 /// Lightweight key schema + attribute definitions for a table.

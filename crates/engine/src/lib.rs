@@ -19,6 +19,7 @@ mod describe_limits;
 mod describe_table;
 mod expected;
 mod expression_helpers;
+mod legacy_filter;
 mod get_item;
 mod import_export;
 mod import_export_io;
@@ -145,6 +146,63 @@ pub(crate) fn sanitize_storage_error(e: extenddb_storage::error::StorageError) -
 }
 
 /// Sideband metrics collected during operation dispatch.
+
+/// Map a serde deserialization error to the appropriate DynamoDB error type.
+///
+/// Enum validation errors (produced by custom Deserialize impls) contain
+/// "validation error detected" and should be returned as `ValidationException`.
+/// All other deserialization failures are `SerializationException`.
+pub(crate) fn deserialize_error(e: serde_json::Error) -> DynamoDbError {
+    let msg = e.to_string();
+    if msg.contains("validation error detected")
+        || msg.contains("may not be empty")
+        || msg.contains("contains duplicates")
+    {
+        DynamoDbError::ValidationException(msg)
+    } else {
+        DynamoDbError::SerializationException(format!(
+            "Start of structure or map found where not expected: {e}"
+        ))
+    }
+}
+
+/// Pre-validate enum fields in a JSON body and return a combined error if multiple are invalid.
+///
+/// DynamoDB reports all invalid enum fields together rather than stopping at the first.
+/// Each entry is `(json_field_name, api_field_name, valid_values)`.
+pub(crate) fn validate_enum_fields(
+    body: &serde_json::Value,
+    fields: &[(&str, &str, &[&str])],
+) -> Result<(), DynamoDbError> {
+    let obj = match body.as_object() {
+        Some(o) => o,
+        None => return Ok(()),
+    };
+    let mut errors: Vec<String> = Vec::new();
+    for &(json_name, api_name, valid) in fields {
+        if let Some(val) = obj.get(json_name) {
+            if let Some(s) = val.as_str() {
+                if !valid.contains(&s) {
+                    errors.push(format!(
+                        "Value '{s}' at '{api_name}' failed to satisfy constraint: \
+                         Member must satisfy enum value set: [{}]",
+                        valid.join(", ")
+                    ));
+                }
+            }
+        }
+    }
+    if errors.is_empty() {
+        return Ok(());
+    }
+    let count = errors.len();
+    let msg = format!(
+        "{count} validation error{} detected: {}",
+        if count == 1 { "" } else { "s" },
+        errors.join("; ")
+    );
+    Err(DynamoDbError::ValidationException(msg))
+}
 ///
 /// Populated by engine handlers so the server layer can record capacity,
 /// returned item counts, and returned byte counts without parsing the JSON

@@ -31,11 +31,54 @@ pub async fn handle_put_item<S: TableEngine + DataEngine>(
     body: Value,
     ctx: &OperationContext<S>,
 ) -> Result<DispatchResult, DynamoDbError> {
+    // Validate table name from raw body first (takes priority over enum errors)
+    if let Some(table_name) = body.get("TableName").and_then(|v| v.as_str()) {
+        extenddb_core::validation::validate_table_name(table_name, &ctx.limits)?;
+    } else if body.get("TableName").is_some_and(|v| v.is_string()) {
+        // empty string — caught by validate_table_name above
+    } else if body.get("TableName").is_none() || body.get("TableName").is_some_and(|v| v.is_null()) {
+        return Err(DynamoDbError::ValidationException(
+            "1 validation error detected: Value null at 'tableName' failed to satisfy constraint: Member must not be null".to_owned()
+        ));
+    }
+
+    // Pre-validate enum fields (report all invalid enums together)
+    crate::validate_enum_fields(&body, &[
+        ("ReturnValues", "returnValues", &["NONE", "ALL_OLD"]),
+        ("ReturnConsumedCapacity", "returnConsumedCapacity", &["INDEXES", "TOTAL", "NONE"]),
+        ("ReturnItemCollectionMetrics", "returnItemCollectionMetrics", &["SIZE", "NONE"]),
+    ])?;
+
     let input: PutItemInput = serde_json::from_value(body).map_err(|e| {
-        DynamoDbError::SerializationException(format!(
-            "Start of structure or map found where not expected: {e}"
-        ))
+        let msg = e.to_string();
+        if msg.contains("parameter values were invalid")
+            || msg.contains("may not be empty")
+            || msg.contains("contains duplicates")
+            || msg.contains("Null attribute value")
+            || msg.contains("validation error detected")
+        {
+            DynamoDbError::ValidationException(msg)
+        } else {
+            DynamoDbError::SerializationException(format!(
+                "Start of structure or map found where not expected: {e}"
+            ))
+        }
     })?;
+
+    // Reject EAV/EAN without an expression
+    let has_expression = input.condition_expression.as_ref().is_some_and(|s| !s.is_empty());
+    if !has_expression && input.expression_attribute_values.as_ref().is_some_and(|m| !m.is_empty()) {
+        return Err(DynamoDbError::ValidationException(
+            "ExpressionAttributeValues can only be specified when using expressions: ConditionExpression is null".to_owned(),
+        ));
+    }
+    if !has_expression && input.expression_attribute_names.as_ref().is_some_and(|m| !m.is_empty()) {
+        return Err(DynamoDbError::ValidationException(
+            "ExpressionAttributeNames can only be specified when using expressions: ConditionExpression is null".to_owned(),
+        ));
+    }
+
+    extenddb_core::validation::validate_table_name(&input.table_name, &ctx.limits)?;
 
     let key_info = ctx
         .table_key_info(&input.table_name)
@@ -57,6 +100,14 @@ pub async fn handle_put_item<S: TableEngine + DataEngine>(
         input.conditional_operator,
         &ctx.limits,
     )?;
+
+    if input.expected.is_none() || input.expected.as_ref().is_some_and(|m| m.is_empty()) {
+        let exprs: Vec<&extenddb_core::expression::Expr> = condition.iter().collect();
+        extenddb_core::expression::validate_unused_attributes(
+            &maps.names, &maps.values, &exprs, &[],
+            &std::collections::HashSet::new(), &std::collections::HashSet::new(),
+        )?;
+    }
 
     let return_old = input.return_values == ReturnValues::AllOld;
 

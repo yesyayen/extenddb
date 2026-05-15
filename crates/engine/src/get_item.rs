@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use extenddb_core::error::DynamoDbError;
-use extenddb_core::expression::{apply_projection, parse_projection, tokenize_with_limit};
+use extenddb_core::expression::{apply_projection, parse_projection, tokenize_for, validate_no_reserved_words};
 use extenddb_core::types::GetItemInput;
 use extenddb_core::types::GetItemOutput;
 use extenddb_core::types::item_size_bytes;
@@ -36,11 +36,7 @@ pub async fn handle_get_item<S: TableEngine + DataEngine>(
     body: Value,
     ctx: &OperationContext<S>,
 ) -> Result<DispatchResult, DynamoDbError> {
-    let input: GetItemInput = serde_json::from_value(body).map_err(|e| {
-        DynamoDbError::SerializationException(format!(
-            "Start of structure or map found where not expected: {e}"
-        ))
-    })?;
+    let input: GetItemInput = serde_json::from_value(body).map_err(crate::deserialize_error)?;
 
     let key_info = ctx
         .table_key_info(&input.table_name)
@@ -108,9 +104,17 @@ pub async fn handle_get_item<S: TableEngine + DataEngine>(
         Some(merged)
     };
 
+    // Validate projection expression upfront (before item fetch result matters)
+    if let Some(ref proj_str) = effective_projection {
+        let proj_tokens = tokenize_for(proj_str, ctx.limits.max_expression_tokens, "ProjectionExpression")?;
+        if ctx.limits.enforce_reserved_keywords {
+            validate_no_reserved_words(&proj_tokens)?;
+        }
+    }
+
     let item = match (&effective_projection, item) {
         (Some(proj_str), Some(fetched)) => {
-            let proj_tokens = tokenize_with_limit(proj_str, ctx.limits.max_expression_tokens)?;
+            let proj_tokens = tokenize_for(proj_str, ctx.limits.max_expression_tokens, "ProjectionExpression")?;
             let projection = parse_projection(&proj_tokens)?;
             let maps = build_expression_maps(effective_proj_names.as_ref(), None);
             Some(apply_projection(&fetched, &projection, &maps)?)

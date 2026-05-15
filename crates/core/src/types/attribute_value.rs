@@ -98,7 +98,9 @@ impl<'de> Visitor<'de> for AttributeValueVisitor {
                 let n = value
                     .as_str()
                     .ok_or_else(|| de::Error::custom("N value must be a string"))?;
-                Ok(AttributeValue::N(n.to_owned()))
+                let normalized = crate::validation::number::validate_and_normalize_number(n)
+                    .unwrap_or_else(|_| n.to_owned());
+                Ok(AttributeValue::N(normalized))
             }
             "B" => {
                 let b64 = value
@@ -115,7 +117,7 @@ impl<'de> Visitor<'de> for AttributeValueVisitor {
                     .ok_or_else(|| de::Error::custom("SS value must be an array"))?;
                 if arr.is_empty() {
                     return Err(de::Error::custom(
-                        "One or more parameter values are not valid. An string set  may not be empty",
+                        "One or more parameter values were invalid: An string set  may not be empty",
                     ));
                 }
                 let set: BTreeSet<String> = arr
@@ -126,6 +128,16 @@ impl<'de> Visitor<'de> for AttributeValueVisitor {
                             .ok_or_else(|| de::Error::custom("SS elements must be strings"))
                     })
                     .collect::<Result<_, _>>()?;
+                let values: Vec<String> = arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(std::borrow::ToOwned::to_owned))
+                    .collect();
+                if values.len() != set.len() {
+                    let repr = values.join(", ");
+                    return Err(de::Error::custom(format!(
+                        "One or more parameter values were invalid: Input collection [{repr}] contains duplicates."
+                    )));
+                }
                 Ok(AttributeValue::SS(set))
             }
             "NS" => {
@@ -134,15 +146,16 @@ impl<'de> Visitor<'de> for AttributeValueVisitor {
                     .ok_or_else(|| de::Error::custom("NS value must be an array"))?;
                 if arr.is_empty() {
                     return Err(de::Error::custom(
-                        "One or more parameter values are not valid. An number set  may not be empty",
+                        "One or more parameter values were invalid: An number set  may not be empty",
                     ));
                 }
                 let set: BTreeSet<String> = arr
                     .iter()
                     .map(|v| {
-                        v.as_str()
-                            .map(std::borrow::ToOwned::to_owned)
-                            .ok_or_else(|| de::Error::custom("NS elements must be strings"))
+                        let s = v.as_str()
+                            .ok_or_else(|| de::Error::custom("NS elements must be strings"))?;
+                        Ok(crate::validation::number::validate_and_normalize_number(s)
+                            .unwrap_or_else(|_| s.to_owned()))
                     })
                     .collect::<Result<_, _>>()?;
                 Ok(AttributeValue::NS(set))
@@ -153,7 +166,7 @@ impl<'de> Visitor<'de> for AttributeValueVisitor {
                     .ok_or_else(|| de::Error::custom("BS value must be an array"))?;
                 if arr.is_empty() {
                     return Err(de::Error::custom(
-                        "One or more parameter values are not valid. Binary sets  may not be empty",
+                        "One or more parameter values were invalid: Binary sets should not be empty",
                     ));
                 }
                 let set: BTreeSet<Vec<u8>> = arr
@@ -181,7 +194,7 @@ impl<'de> Visitor<'de> for AttributeValueVisitor {
                     .ok_or_else(|| de::Error::custom("NULL value must be a boolean"))?;
                 if !n {
                     return Err(de::Error::custom(
-                        "SerializationException: NULL value must be true",
+                        "One or more parameter values were invalid: Null attribute value types must have the value of true",
                     ));
                 }
                 Ok(AttributeValue::Null)
@@ -346,14 +359,14 @@ mod tests {
     fn empty_binary_set_rejected() {
         let json = r#"{"BS":[]}"#;
         let err = serde_json::from_str::<AttributeValue>(json).unwrap_err();
-        assert!(err.to_string().contains("may not be empty"));
+        assert!(err.to_string().contains("should not be empty"));
     }
 
     #[test]
     fn null_false_rejected() {
         let json = r#"{"NULL":false}"#;
         let err = serde_json::from_str::<AttributeValue>(json).unwrap_err();
-        assert!(err.to_string().contains("NULL value must be true"));
+        assert!(err.to_string().contains("Null attribute value types must have the value of true"));
     }
 
     #[test]

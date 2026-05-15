@@ -7,12 +7,25 @@ use std::collections::HashMap;
 
 use extenddb_core::error::DynamoDbError;
 use extenddb_core::expression::{
-    Expr, ExpressionMaps, parse_condition_with_depth_limit, tokenize_with_limit,
+    Expr, ExpressionMaps, Token, parse_condition_with_depth_limit, tokenize_with_limit,
+    validate_no_reserved_words,
 };
 use extenddb_core::limits::LimitsConfig;
 use extenddb_core::types::{AttributeValue, ConditionalOperator, ExpectedAttributeValue};
 
 use crate::expected::desugar_expected;
+
+/// Tokenize an expression and optionally validate reserved keywords.
+pub fn tokenize_expression(
+    input: &str,
+    limits: &LimitsConfig,
+) -> Result<Vec<Token>, DynamoDbError> {
+    let tokens = tokenize_with_limit(input, limits.max_expression_tokens)?;
+    if limits.enforce_reserved_keywords {
+        validate_no_reserved_words(&tokens)?;
+    }
+    Ok(tokens)
+}
 
 /// Build `ExpressionMaps` from optional request fields.
 ///
@@ -54,7 +67,7 @@ pub fn parse_optional_condition(
 ) -> Result<Option<Expr>, DynamoDbError> {
     match expr {
         Some(s) if !s.is_empty() => {
-            let tokens = tokenize_with_limit(s, limits.max_expression_tokens)?;
+            let tokens = tokenize_expression(s, limits)?;
             let ast = parse_condition_with_depth_limit(&tokens, limits.max_expression_depth)?;
             Ok(Some(ast))
         }
@@ -75,6 +88,7 @@ pub fn parse_optional_filter(
     limits: &LimitsConfig,
 ) -> Result<Option<Expr>, DynamoDbError> {
     parse_optional_condition(expr, limits)
+        .map_err(|e| prefix_expression_error(e, "FilterExpression"))
 }
 
 /// Resolve a condition from either `ConditionExpression` or legacy `Expected`.
@@ -131,4 +145,19 @@ pub fn resolve_condition(
     let maps = build_expression_maps(names, values);
     let condition = parse_optional_condition(condition_expression, limits)?;
     Ok((condition, maps))
+}
+
+/// Prefix an expression error with the expression type, matching DynamoDB's format.
+/// If the error already starts with "Invalid", it's returned as-is.
+pub fn prefix_expression_error(err: DynamoDbError, expr_type: &str) -> DynamoDbError {
+    match err {
+        DynamoDbError::ValidationException(msg) => {
+            if msg.starts_with("Invalid ") || msg.starts_with("1 validation") {
+                DynamoDbError::ValidationException(msg)
+            } else {
+                DynamoDbError::ValidationException(format!("Invalid {expr_type}: {msg}"))
+            }
+        }
+        other => other,
+    }
 }

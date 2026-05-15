@@ -3,10 +3,12 @@
 
 //! `Scan` operation handler.
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use extenddb_core::error::DynamoDbError;
-use extenddb_core::expression::{parse_projection, tokenize_with_limit};
+use extenddb_core::expression::{parse_projection, tokenize_with_limit, ExpressionMaps};
 use extenddb_core::types::{
     IndexType, ScanInput, ScanOutput, Select, TableKeyInfo, item_size_bytes,
 };
@@ -18,6 +20,7 @@ use crate::capacity_helpers;
 use crate::create_table::storage_err_to_dynamo;
 use crate::expression_helpers::{build_expression_maps, parse_optional_filter};
 use crate::index_helpers::combined_lek_key_schema;
+use crate::legacy_filter::desugar_filter;
 use crate::read_helpers::apply_post_read;
 use crate::serialize_output;
 use crate::{DispatchMetrics, DispatchResult};
@@ -35,11 +38,7 @@ pub async fn handle_scan<S: TableEngine + DataEngine>(
     body: Value,
     ctx: &OperationContext<S>,
 ) -> Result<DispatchResult, DynamoDbError> {
-    let input: ScanInput = serde_json::from_value(body).map_err(|e| {
-        DynamoDbError::SerializationException(format!(
-            "Start of structure or map found where not expected: {e}"
-        ))
-    })?;
+    let input: ScanInput = serde_json::from_value(body).map_err(crate::deserialize_error)?;
 
     // P118: Fetch key_info first so we can use table_id for index lookup.
     let key_info = ctx
@@ -81,7 +80,7 @@ pub async fn handle_scan<S: TableEngine + DataEngine>(
         }
         (None, Some(_)) => {
             return Err(DynamoDbError::ValidationException(
-                "The Segment parameter is required but was not present in the request when TotalSegments parameter is present"
+                "The Segment parameter is required but was not present in the request when parameter TotalSegments is present"
                     .to_owned(),
             ));
         }
@@ -91,11 +90,11 @@ pub async fn handle_scan<S: TableEngine + DataEngine>(
                     "The parameter TotalSegments should be greater than or equal to 1".to_owned(),
                 ));
             }
-            if seg < 0 || seg >= total {
-                return Err(DynamoDbError::ValidationException(
-                    "The Segment parameter is zero-based and must be less than parameter TotalSegments"
-                        .to_owned(),
-                ));
+            if seg >= total {
+                return Err(DynamoDbError::ValidationException(format!(
+                    "The Segment parameter is zero-based and must be less than parameter TotalSegments: \
+                     Segment: {seg} is not less than TotalSegments: {total}"
+                )));
             }
         }
         (None, None) => {}
@@ -125,21 +124,93 @@ pub async fn handle_scan<S: TableEngine + DataEngine>(
         key_info.clone()
     };
 
+    // --- Legacy vs expression mutual exclusivity checks ---
+    let has_fe = input.filter_expression.is_some();
+    let has_sf = input.scan_filter.as_ref().is_some_and(|m| !m.is_empty());
+
+    if has_fe && has_sf {
+        return Err(DynamoDbError::ValidationException(
+            "Can not use both expression and non-expression parameters in the same request: \
+             Non-expression parameters: {ScanFilter} Expression parameters: {FilterExpression}"
+                .to_owned(),
+        ));
+    }
+
+    let has_pe = input.projection_expression.is_some();
+    let has_atg = input.attributes_to_get.as_ref().is_some_and(|a| !a.is_empty());
+
+    if has_pe && has_atg {
+        return Err(DynamoDbError::ValidationException(
+            "Can not use both expression and non-expression parameters in the same request: \
+             Non-expression parameters: {AttributesToGet} Expression parameters: {ProjectionExpression}"
+                .to_owned(),
+        ));
+    }
+
     let maps = build_expression_maps(
         input.expression_attribute_names.as_ref(),
         input.expression_attribute_values.as_ref(),
     );
 
-    // Parse FilterExpression
-    let filter = parse_optional_filter(input.filter_expression.as_deref(), &ctx.limits)?;
+    // Parse FilterExpression or desugar legacy ScanFilter
+    let (filter, filter_maps) = if let Some(ref sf) = input.scan_filter {
+        if !sf.is_empty() {
+            let cond_op = input.conditional_operator.unwrap_or_default();
+            let (expr, fmaps) = desugar_filter(sf, cond_op)?;
+            (Some(expr), Some(fmaps))
+        } else {
+            (parse_optional_filter(input.filter_expression.as_deref(), &ctx.limits)?, None)
+        }
+    } else {
+        (parse_optional_filter(input.filter_expression.as_deref(), &ctx.limits)?, None)
+    };
 
-    // Parse ProjectionExpression
-    let projection = if let Some(ref proj_str) = input.projection_expression {
+    // Parse ProjectionExpression or desugar legacy AttributesToGet
+    let (effective_projection_str, extra_proj_names) = if input.projection_expression.is_some() {
+        (input.projection_expression.clone(), HashMap::new())
+    } else if let Some(ref attrs) = input.attributes_to_get {
+        let mut names_map = HashMap::new();
+        let placeholders: Vec<String> = attrs
+            .iter()
+            .enumerate()
+            .map(|(i, attr)| {
+                let placeholder = format!("#_ag{i}");
+                names_map.insert(placeholder.clone(), attr.clone());
+                placeholder
+            })
+            .collect();
+        (Some(placeholders.join(", ")), names_map)
+    } else {
+        (None, HashMap::new())
+    };
+
+    let projection = if let Some(ref proj_str) = effective_projection_str {
         let proj_tokens = tokenize_with_limit(proj_str, ctx.limits.max_expression_tokens)?;
         Some(parse_projection(&proj_tokens)?)
     } else {
         None
     };
+
+    // Validate unused expression attributes
+    {
+        let exprs: Vec<&extenddb_core::expression::Expr> = filter.iter().collect();
+        let mut extra_names = std::collections::HashSet::new();
+        if let Some(ref proj) = projection {
+            for path in proj {
+                for el in path {
+                    if let extenddb_core::expression::PathElement::Attribute(name) = el {
+                        if let Some(ref_name) = name.strip_prefix('#') {
+                            extra_names.insert(ref_name.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+        extenddb_core::expression::validate_unused_attributes(
+            &maps.names, &maps.values, &exprs, &[],
+            &extra_names, &std::collections::HashSet::new(),
+        )?;
+    }
 
     // Validate Select vs ProjectionExpression and index requirements
     if let Some(Select::AllProjectedAttributes) = input.select {
@@ -150,7 +221,7 @@ pub async fn handle_scan<S: TableEngine + DataEngine>(
         }
     }
     if let Some(Select::Count) = input.select {
-        if input.projection_expression.is_some() {
+        if effective_projection_str.is_some() {
             return Err(DynamoDbError::ValidationException(
                 "Cannot specify the ProjectionExpression when Select is COUNT".to_owned(),
             ));
@@ -161,6 +232,23 @@ pub async fn handle_scan<S: TableEngine + DataEngine>(
         index_info.as_ref()
     } else {
         None
+    };
+
+    // Build the combined expression maps for post-read evaluation.
+    let combined_maps = {
+        let mut names = maps.names.clone();
+        let mut values = maps.values.clone();
+
+        if let Some(ref fm) = filter_maps {
+            values.extend(fm.values.clone());
+        }
+        if !extra_proj_names.is_empty() {
+            for (k, v) in &extra_proj_names {
+                let stripped = k.strip_prefix('#').unwrap_or(k);
+                names.insert(stripped.to_owned(), v.clone());
+            }
+        }
+        ExpressionMaps::new(names, values)
     };
 
     // Scan storage
@@ -191,7 +279,7 @@ pub async fn handle_scan<S: TableEngine + DataEngine>(
         storage_last_key,
         &filter,
         &projection,
-        &maps,
+        &combined_maps,
         &lek_key_schema,
         input.select.as_ref(),
         index_proj,

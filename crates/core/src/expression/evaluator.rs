@@ -38,7 +38,7 @@ pub fn evaluate_condition(
                     let rpn = placeholder_numeric(right, maps);
                     Ok(compare_values(l, r, *op, lpn, rpn))
                 }
-                _ => Ok(false),
+                _ => Ok(*op == CompareOp::Ne),
             }
         }
         Expr::And(left, right) => {
@@ -295,9 +295,7 @@ fn evaluate_size(
     }
     let val = resolve_to_value(&args[0], item, maps)?;
     let Some(ref v) = val else {
-        return Err(DynamoDbError::ValidationException(
-            "Invalid ConditionExpression: size operand does not exist".to_owned(),
-        ));
+        return Ok(AttributeValue::N("0".to_owned()));
     };
     let sz = match v.as_ref() {
         AttributeValue::S(s) => s.len(),

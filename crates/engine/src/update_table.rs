@@ -4,7 +4,7 @@
 //! `UpdateTable` operation handler.
 
 use extenddb_core::error::DynamoDbError;
-use extenddb_core::types::{BillingMode, UpdateTableInput};
+use extenddb_core::types::{BillingMode, DescribeTableInput, UpdateTableInput};
 use extenddb_storage::TableEngine;
 use serde_json::Value;
 
@@ -28,11 +28,7 @@ pub async fn handle_update_table<S: TableEngine>(
     body: Value,
     ctx: &OperationContext<S>,
 ) -> Result<Value, DynamoDbError> {
-    let input: UpdateTableInput = serde_json::from_value(body).map_err(|e| {
-        DynamoDbError::SerializationException(format!(
-            "Start of structure or map found where not expected: {e}"
-        ))
-    })?;
+    let input: UpdateTableInput = serde_json::from_value(body).map_err(crate::deserialize_error)?;
 
     if input.table_name.is_empty() {
         return Err(DynamoDbError::ValidationException(
@@ -75,6 +71,24 @@ pub async fn handle_update_table<S: TableEngine>(
         ));
     }
 
+    // PAY_PER_REQUEST with ProvisionedThroughput is invalid.
+    if matches!(input.billing_mode, Some(BillingMode::PayPerRequest))
+        && input.provisioned_throughput.is_some()
+    {
+        return Err(DynamoDbError::ValidationException(
+            "One or more parameter values were invalid: Neither ReadCapacityUnits nor WriteCapacityUnits can be specified when BillingMode is PAY_PER_REQUEST".to_owned(),
+        ));
+    }
+
+    // Validate throughput values (must be > 0).
+    if let Some(ref tp) = input.provisioned_throughput {
+        if tp.read_capacity_units < 1 || tp.write_capacity_units < 1 {
+            return Err(DynamoDbError::ValidationException(
+                "One or more parameter values were invalid: ReadCapacityUnits and WriteCapacityUnits must each be at least 1".to_owned(),
+            ));
+        }
+    }
+
     // Validate GSI updates: each entry must have exactly one of Create, Update, or Delete.
     if let Some(updates) = &input.global_secondary_index_updates {
         for update in updates {
@@ -103,9 +117,55 @@ pub async fn handle_update_table<S: TableEngine>(
                         "One or more parameter values were invalid: KeySchema must not be empty for GSI creation".to_owned(),
                     ));
                 }
+                // Validate that all key attributes are defined in AttributeDefinitions
+                let attr_defs = input.attribute_definitions.as_deref().unwrap_or(&[]);
+                for ks in &create.key_schema {
+                    if !attr_defs.iter().any(|ad| ad.attribute_name == ks.attribute_name) {
+                        return Err(DynamoDbError::ValidationException(format!(
+                            "One or more parameter values were invalid: Some index key attributes are not defined in AttributeDefinitions. \
+                             Keys: [{}], AttributeDefinitions: [{}]",
+                            ks.attribute_name,
+                            attr_defs.iter().map(|ad| ad.attribute_name.as_str()).collect::<Vec<_>>().join(", ")
+                        )));
+                    }
+                }
             }
             if let Some(delete) = &update.delete {
                 extenddb_core::validation::validate_index_name(&delete.index_name)?;
+            }
+        }
+    }
+
+    // No-op rejection: setting same billing mode to PROVISIONED with same throughput
+    // values is rejected by DynamoDB.
+    if matches!(input.billing_mode, Some(BillingMode::Provisioned)) {
+        if let Some(ref tp) = input.provisioned_throughput {
+            let current = ctx
+                .storage
+                .describe_table(&ctx.account_id, DescribeTableInput { table_name: input.table_name.clone() })
+                .await
+                .map_err(|e| match e {
+                    extenddb_storage::error::StorageError::TableNotFound(_) => {
+                        DynamoDbError::ResourceNotFoundException(
+                            "Requested resource not found".to_owned()
+                        )
+                    }
+                    other => crate::sanitize_storage_error(other),
+                })?;
+            let current_tp = &current.provisioned_throughput;
+            let is_provisioned = current.billing_mode_summary.as_ref()
+                .map_or(true, |b| b.billing_mode == BillingMode::Provisioned);
+            if current_tp.read_capacity_units == tp.read_capacity_units
+                && current_tp.write_capacity_units == tp.write_capacity_units
+                && is_provisioned
+            {
+                return Err(DynamoDbError::ValidationException(format!(
+                    "The provisioned throughput for the table will not change. The requested value equals the current value. \
+                     Current ReadCapacityUnits provisioned for the table: {}. Requested ReadCapacityUnits: {}. \
+                     Current WriteCapacityUnits provisioned for the table: {}. Requested WriteCapacityUnits: {}.",
+                    current_tp.read_capacity_units, tp.read_capacity_units,
+                    current_tp.write_capacity_units, tp.write_capacity_units
+                )));
             }
         }
     }
@@ -117,7 +177,7 @@ pub async fn handle_update_table<S: TableEngine>(
         .map_err(|e| match e {
             extenddb_storage::error::StorageError::TableNotFound(name) => {
                 DynamoDbError::ResourceNotFoundException(format!(
-                    "Requested resource not found: Table: {name} not found"
+                    "Requested resource not found"
                 ))
             }
             extenddb_storage::error::StorageError::TableNotActive(name) => {
@@ -131,7 +191,7 @@ pub async fn handle_update_table<S: TableEngine>(
                 ))
             }
             extenddb_storage::error::StorageError::IndexNotFound(name) => {
-                DynamoDbError::ValidationException(format!(
+                DynamoDbError::ResourceNotFoundException(format!(
                     "One or more parameter values were invalid: Index not found: {name}"
                 ))
             }

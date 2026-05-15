@@ -43,25 +43,25 @@ pub async fn handle_batch_write_item<S: TableEngine + DataEngine>(
     body: Value,
     ctx: &OperationContext<S>,
 ) -> Result<DispatchResult, DynamoDbError> {
-    let input: BatchWriteItemInput = serde_json::from_value(body).map_err(|e| {
-        DynamoDbError::SerializationException(format!(
-            "Start of structure or map found where not expected: {e}"
-        ))
-    })?;
+    let input: BatchWriteItemInput = serde_json::from_value(body).map_err(crate::deserialize_error)?;
 
     // Validate: RequestItems must not be empty
     if input.request_items.is_empty() {
         return Err(DynamoDbError::ValidationException(
-            "1 validation error detected: Value null at 'requestItems' failed to satisfy constraint: Member must not be null".to_owned(),
+            "The requestItems parameter is required for BatchWriteItem".to_owned(),
         ));
     }
 
-    // Validate: total operations across all tables <= 25
-    let total_ops: usize = input.request_items.values().map(Vec::len).sum();
-    if total_ops > MAX_BATCH_WRITE_ITEMS {
-        return Err(DynamoDbError::ValidationException(
-            "Too many items requested for the BatchWriteItem call".to_owned(),
-        ));
+    // Validate: per-table operations <= 25
+    for (table_name, reqs) in &input.request_items {
+        if reqs.len() > MAX_BATCH_WRITE_ITEMS {
+            let items_repr = reqs.iter().map(|_| "WriteRequest").collect::<Vec<_>>().join(", ");
+            return Err(DynamoDbError::ValidationException(format!(
+                "1 validation error detected: Value '{{{table_name}=[{items_repr}]}}' at 'requestItems' failed to satisfy constraint: \
+                 Map value must satisfy constraint: [Member must have length less than or equal to 25, \
+                 Member must have length greater than or equal to 1]"
+            )));
+        }
     }
 
     // Validate: each table must have at least one request

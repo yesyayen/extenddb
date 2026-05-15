@@ -3,12 +3,12 @@
 
 //! `BatchGetItem` operation handler.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
 use extenddb_core::error::DynamoDbError;
-use extenddb_core::expression::{apply_projection, parse_projection, tokenize_with_limit};
+use extenddb_core::expression::{apply_projection, parse_projection};
 use extenddb_core::types::{BatchGetItemInput, BatchGetItemOutput, Item, item_size_bytes};
 use extenddb_core::validation::validate_batch_key_only;
 use extenddb_storage::DataEngine;
@@ -37,25 +37,23 @@ pub async fn handle_batch_get_item<S: TableEngine + DataEngine>(
     body: Value,
     ctx: &OperationContext<S>,
 ) -> Result<DispatchResult, DynamoDbError> {
-    let input: BatchGetItemInput = serde_json::from_value(body).map_err(|e| {
-        DynamoDbError::SerializationException(format!(
-            "Start of structure or map found where not expected: {e}"
-        ))
-    })?;
+    let input: BatchGetItemInput = serde_json::from_value(body).map_err(crate::deserialize_error)?;
 
     // Validate: RequestItems must not be empty
     if input.request_items.is_empty() {
         return Err(DynamoDbError::ValidationException(
-            "1 validation error detected: Value null at 'requestItems' failed to satisfy constraint: Member must not be null".to_owned(),
+            "The requestItems parameter is required for BatchGetItem".to_owned(),
         ));
     }
 
-    // Validate: total keys across all tables <= 100
-    let total_keys: usize = input.request_items.values().map(|ka| ka.keys.len()).sum();
-    if total_keys > MAX_BATCH_GET_KEYS {
-        return Err(DynamoDbError::ValidationException(
-            "Too many items requested for the BatchGetItem call".to_owned(),
-        ));
+    // Validate: per-table keys <= 100
+    for (table_name, ka) in &input.request_items {
+        if ka.keys.len() > MAX_BATCH_GET_KEYS {
+            return Err(DynamoDbError::ValidationException(format!(
+                "1 validation error detected: Value at 'RequestItems.{table_name}.member.Keys' failed to satisfy constraint: \
+                 Member must have length less than or equal to 100"
+            )));
+        }
     }
 
     // Validate: each table must have at least one key
@@ -111,7 +109,7 @@ pub async fn handle_batch_get_item<S: TableEngine + DataEngine>(
         };
 
         let projection = if let Some(ref proj_str) = effective_proj_str {
-            let proj_tokens = tokenize_with_limit(proj_str, ctx.limits.max_expression_tokens)?;
+            let proj_tokens = crate::expression_helpers::tokenize_expression(proj_str, &ctx.limits)?;
             Some(parse_projection(&proj_tokens)?)
         } else {
             None
@@ -131,7 +129,14 @@ pub async fn handle_batch_get_item<S: TableEngine + DataEngine>(
         };
 
         let mut table_items: Vec<Item> = Vec::new();
+        let mut seen_keys: HashSet<Vec<u8>> = HashSet::with_capacity(ka.keys.len());
         for key in &ka.keys {
+            let key_bytes = serialize_key_for_dedup(key);
+            if !seen_keys.insert(key_bytes) {
+                return Err(DynamoDbError::ValidationException(
+                    "Provided list of item keys contains duplicates".to_owned(),
+                ));
+            }
             validate_batch_key_only(key, &key_info.key_schema, &key_info.attribute_definitions)?;
 
             if let Some(item) = ctx
@@ -181,4 +186,8 @@ pub async fn handle_batch_get_item<S: TableEngine + DataEngine>(
             ..Default::default()
         },
     })
+}
+
+fn serialize_key_for_dedup(key: &Item) -> Vec<u8> {
+    serde_json::to_vec(key).unwrap_or_default()
 }

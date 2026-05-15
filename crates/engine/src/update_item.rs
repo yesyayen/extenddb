@@ -12,7 +12,8 @@ use serde_json::Value;
 
 use extenddb_core::error::DynamoDbError;
 use extenddb_core::expression::{
-    ExpressionMaps, PathElement, UpdateAction, parse_update, tokenize_with_limit,
+    ExpressionMaps, PathElement, UpdateAction, parse_update_from, tokenize_for,
+    validate_no_reserved_words,
 };
 use extenddb_core::types::{
     AttributeValue, Item, ReturnValues, TableKeyInfo, UpdateItemInput, UpdateItemOutput,
@@ -41,11 +42,13 @@ pub async fn handle_update_item<S: TableEngine + DataEngine>(
     body: Value,
     ctx: &OperationContext<S>,
 ) -> Result<DispatchResult, DynamoDbError> {
-    let input: UpdateItemInput = serde_json::from_value(body).map_err(|e| {
-        DynamoDbError::SerializationException(format!(
-            "Start of structure or map found where not expected: {e}"
-        ))
-    })?;
+    crate::validate_enum_fields(&body, &[
+        ("ReturnValues", "returnValues", &["NONE", "ALL_OLD", "ALL_NEW", "UPDATED_OLD", "UPDATED_NEW"]),
+        ("ReturnConsumedCapacity", "returnConsumedCapacity", &["INDEXES", "TOTAL", "NONE"]),
+    ])?;
+    let input: UpdateItemInput = serde_json::from_value(body).map_err(crate::deserialize_error)?;
+
+    extenddb_core::validation::validate_table_name(&input.table_name, &ctx.limits)?;
 
     let key_info = ctx
         .table_key_info(&input.table_name)
@@ -111,8 +114,20 @@ pub async fn handle_update_item<S: TableEngine + DataEngine>(
 
     // Parse the update expression
     let update_expr = effective_update_expr.as_deref().unwrap_or("");
-    let update_tokens = tokenize_with_limit(update_expr, ctx.limits.max_expression_tokens)?;
-    let actions = parse_update(&update_tokens)?;
+    let update_tokens = tokenize_for(update_expr, ctx.limits.max_expression_tokens, "UpdateExpression")?;
+    if ctx.limits.enforce_reserved_keywords {
+        validate_no_reserved_words(&update_tokens)?;
+    }
+    let actions = parse_update_from(&update_tokens, update_expr)?;
+
+    if input.expected.is_none() || input.expected.as_ref().is_some_and(|m| m.is_empty()) {
+        let exprs: Vec<&extenddb_core::expression::Expr> = condition.iter().collect();
+        extenddb_core::expression::validate_unused_attributes(
+            &maps.names, &maps.values, &exprs,
+            &actions.iter().collect::<Vec<_>>(),
+            &std::collections::HashSet::new(), &std::collections::HashSet::new(),
+        )?;
+    }
 
     // Validate that no update action targets a key attribute (REQ-DATA-003)
     validate_no_key_updates(&actions, &key_info, &maps)?;
@@ -223,7 +238,7 @@ fn validate_no_key_updates(
             for ks in &key_info.key_schema {
                 if ks.attribute_name == resolved {
                     return Err(DynamoDbError::ValidationException(format!(
-                        "One or more parameter values are not valid. Cannot update attribute {}. \
+                        "One or more parameter values were invalid: Cannot update attribute {}. \
                          This attribute is part of the key",
                         ks.attribute_name
                     )));

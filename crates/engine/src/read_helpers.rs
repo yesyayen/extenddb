@@ -66,7 +66,14 @@ pub fn apply_post_read(
 
         if let Some(filter_expr) = filter {
             let passed = evaluate_condition(filter_expr, item, maps)
-                .map_err(|e| DynamoDbError::ValidationException(e.to_string()))?;
+                .map_err(|e| {
+                    let msg = e.to_string();
+                    if msg.starts_with("Invalid ") {
+                        DynamoDbError::ValidationException(msg)
+                    } else {
+                        DynamoDbError::ValidationException(format!("Invalid FilterExpression: {msg}"))
+                    }
+                })?;
             if !passed {
                 continue;
             }
