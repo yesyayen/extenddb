@@ -4,7 +4,7 @@
 //! `UpdateTable` operation handler.
 
 use extenddb_core::error::DynamoDbError;
-use extenddb_core::types::{BillingMode, UpdateTableInput};
+use extenddb_core::types::{BillingMode, DescribeTableInput, UpdateTableInput};
 use extenddb_storage::TableEngine;
 use serde_json::Value;
 
@@ -71,6 +71,24 @@ pub async fn handle_update_table<S: TableEngine>(
         ));
     }
 
+    // PAY_PER_REQUEST with ProvisionedThroughput is invalid.
+    if matches!(input.billing_mode, Some(BillingMode::PayPerRequest))
+        && input.provisioned_throughput.is_some()
+    {
+        return Err(DynamoDbError::ValidationException(
+            "One or more parameter values were invalid: Neither ReadCapacityUnits nor WriteCapacityUnits can be specified when BillingMode is PAY_PER_REQUEST".to_owned(),
+        ));
+    }
+
+    // Validate throughput values (must be > 0).
+    if let Some(ref tp) = input.provisioned_throughput {
+        if tp.read_capacity_units < 1 || tp.write_capacity_units < 1 {
+            return Err(DynamoDbError::ValidationException(
+                "One or more parameter values were invalid: ReadCapacityUnits and WriteCapacityUnits must each be at least 1".to_owned(),
+            ));
+        }
+    }
+
     // Validate GSI updates: each entry must have exactly one of Create, Update, or Delete.
     if let Some(updates) = &input.global_secondary_index_updates {
         for update in updates {
@@ -102,6 +120,38 @@ pub async fn handle_update_table<S: TableEngine>(
             }
             if let Some(delete) = &update.delete {
                 extenddb_core::validation::validate_index_name(&delete.index_name)?;
+            }
+        }
+    }
+
+    // No-op rejection: setting same billing mode to PROVISIONED with same throughput
+    // values is rejected by DynamoDB.
+    if matches!(input.billing_mode, Some(BillingMode::Provisioned)) {
+        if let Some(ref tp) = input.provisioned_throughput {
+            let current = ctx
+                .storage
+                .describe_table(&ctx.account_id, DescribeTableInput { table_name: input.table_name.clone() })
+                .await
+                .map_err(|e| match e {
+                    extenddb_storage::error::StorageError::TableNotFound(_) => {
+                        DynamoDbError::ResourceNotFoundException(
+                            "Requested resource not found".to_owned()
+                        )
+                    }
+                    other => crate::sanitize_storage_error(other),
+                })?;
+            let current_tp = &current.provisioned_throughput;
+            if current_tp.read_capacity_units == tp.read_capacity_units
+                && current_tp.write_capacity_units == tp.write_capacity_units
+                && current.billing_mode_summary.as_ref().is_some_and(|b| b.billing_mode == BillingMode::Provisioned)
+            {
+                return Err(DynamoDbError::ValidationException(format!(
+                    "The provisioned throughput for the table will not change. The requested value equals the current value. \
+                     Current ReadCapacityUnits provisioned for the table: {}. Requested ReadCapacityUnits: {}. \
+                     Current WriteCapacityUnits provisioned for the table: {}. Requested WriteCapacityUnits: {}.",
+                    current_tp.read_capacity_units, tp.read_capacity_units,
+                    current_tp.write_capacity_units, tp.write_capacity_units
+                )));
             }
         }
     }
