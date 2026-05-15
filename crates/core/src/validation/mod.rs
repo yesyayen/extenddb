@@ -512,10 +512,9 @@ pub fn validate_update_item(
     validate_key_only(&input.key, key_schema, attr_defs)?;
 
     // Either UpdateExpression or AttributeUpdates must be provided.
-    let has_update_expr = input
-        .update_expression
-        .as_deref()
-        .is_some_and(|s| !s.trim().is_empty());
+    // Note: an empty string UpdateExpression is "provided" but will fail later
+    // with the correct "The expression can not be empty;" message from tokenize_for.
+    let has_update_expr = input.update_expression.is_some();
     let has_attr_updates = input
         .attribute_updates
         .as_ref()
