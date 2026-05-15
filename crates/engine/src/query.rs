@@ -227,6 +227,12 @@ pub async fn handle_query<S: TableEngine + DataEngine>(
         (parse_optional_filter(input.filter_expression.as_deref(), &ctx.limits)?, None)
     };
 
+    // Validate #name references in filter are defined in ExpressionAttributeNames
+    if let Some(ref filter_expr) = filter {
+        let names = input.expression_attribute_names.as_ref();
+        validate_name_refs_in_expr(filter_expr, names, "FilterExpression")?;
+    }
+
     // Parse ProjectionExpression or desugar legacy AttributesToGet
     let (effective_projection_str, extra_proj_names) = if input.projection_expression.is_some() {
         (input.projection_expression.clone(), HashMap::new())
@@ -404,5 +410,66 @@ fn resolve_path_attr_name(
             }
         }
         _ => None,
+    }
+}
+
+/// Validate that all `#name` references in an expression AST are defined.
+fn validate_name_refs_in_expr(
+    expr: &extenddb_core::expression::Expr,
+    names: Option<&HashMap<String, String>>,
+    expr_type: &str,
+) -> Result<(), DynamoDbError> {
+    use extenddb_core::expression::Expr;
+    match expr {
+        Expr::Path(elements) => {
+            for el in elements {
+                if let PathElement::Attribute(name) = el {
+                    if let Some(ref_name) = name.strip_prefix('#') {
+                        let key_with_hash = format!("#{ref_name}");
+                        let defined = names.as_ref().is_some_and(|m| {
+                            m.contains_key(ref_name) || m.contains_key(key_with_hash.as_str())
+                        });
+                        if !defined {
+                            return Err(DynamoDbError::ValidationException(format!(
+                                "Invalid {expr_type}: An expression attribute name used in the document path is not defined; attribute name: #{ref_name}"
+                            )));
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+        Expr::Compare { left, right, .. } => {
+            validate_name_refs_in_expr(left, names, expr_type)?;
+            validate_name_refs_in_expr(right, names, expr_type)
+        }
+        Expr::And(l, r) | Expr::Or(l, r) => {
+            validate_name_refs_in_expr(l, names, expr_type)?;
+            validate_name_refs_in_expr(r, names, expr_type)
+        }
+        Expr::Not(inner) => validate_name_refs_in_expr(inner, names, expr_type),
+        Expr::Between { operand, low, high } => {
+            validate_name_refs_in_expr(operand, names, expr_type)?;
+            validate_name_refs_in_expr(low, names, expr_type)?;
+            validate_name_refs_in_expr(high, names, expr_type)
+        }
+        Expr::In { operand, list } => {
+            validate_name_refs_in_expr(operand, names, expr_type)?;
+            for item in list {
+                validate_name_refs_in_expr(item, names, expr_type)?;
+            }
+            Ok(())
+        }
+        Expr::Function { args, .. } => {
+            for arg in args {
+                validate_name_refs_in_expr(arg, names, expr_type)?;
+            }
+            Ok(())
+        }
+        Expr::Arithmetic { left, right, .. } => {
+            validate_name_refs_in_expr(left, names, expr_type)?;
+            validate_name_refs_in_expr(right, names, expr_type)
+        }
+        Expr::Placeholder(_) => Ok(()),
     }
 }
