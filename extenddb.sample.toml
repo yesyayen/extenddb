@@ -37,17 +37,20 @@
 # Multiple independent catalogs can coexist on one PostgreSQL instance.
 # connection_string = "postgresql://extenddb:extenddb-local-dev@localhost:5432/extenddb_catalog"
 # pool_size = 20               # Maximum concurrent database connections
-                                # for DynamoDB data operations. Total PostgreSQL
+                                # for DynamoDB data operations. Default: 20.
+                                # Minimum: 10 (smaller values are clamped with
+                                # a startup warning). Total PostgreSQL
                                 # connections used: pool_size + catalog_pool_size + 1
                                 # (log-level poller: 1). Increase for
                                 # higher concurrency; ensure PostgreSQL
                                 # max_connections >= pool_size + catalog_pool_size + 1.
 # catalog_pool_size = 20       # Maximum concurrent connections for the
                                 # management/catalog pool (authz, IAM, console).
-                                # Defaults to pool_size if not set. With auth
-                                # enabled, each DynamoDB request makes concurrent
-                                # authz queries — size this to match expected
-                                # concurrency.
+                                # Defaults to pool_size if not set.
+                                # Minimum: 10 (smaller values are clamped with
+                                # a startup warning). With auth enabled, each
+                                # DynamoDB request makes concurrent authz queries
+                                # — size this to match expected concurrency.
 
 [auth]
 # provider = "builtin"          # Auth provider:
