@@ -46,7 +46,7 @@ impl PostgresEngine {
         // check was in the engine layer.
         if matches!(input.billing_mode, Some(BillingMode::Provisioned)) {
             if let Some(ref pt) = input.provisioned_throughput {
-                let current_row: Option<(Option<String>, serde_json::Value)> = sqlx::query_as(
+                let current_row: Option<(Option<String>, Option<serde_json::Value>)> = sqlx::query_as(
                     "SELECT billing_mode, provisioned_throughput FROM tables \
                      WHERE account_id = $1 AND table_name = $2",
                 )
@@ -56,7 +56,8 @@ impl PostgresEngine {
                 .await
                 .map_err(|e| StorageError::Internal(e.to_string()))?;
 
-                if let Some((current_bm, current_pt)) = current_row {
+                if let Some((current_bm, current_pt_opt)) = current_row {
+                    let current_pt = current_pt_opt.unwrap_or(serde_json::Value::Object(Default::default()));
                     let is_provisioned =
                         current_bm.as_deref() == Some("PROVISIONED") || current_bm.is_none();
                     let current_rcu = current_pt
