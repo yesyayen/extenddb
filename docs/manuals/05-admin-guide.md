@@ -74,8 +74,8 @@ These settings require a server restart to take effect.
 | Key | Default | Description |
 |-----|---------|-------------|
 | `connection_string` | `postgresql://extenddb:extenddb-local-dev@localhost:5432/extenddb_catalog` | Catalog database connection string |
-| `pool_size` | `20` | Maximum concurrent database connections |
-| `catalog_pool_size` | (= `pool_size`) | Maximum connections for management/authz pool |
+| `pool_size` | `20` | Maximum concurrent database connections (minimum: 10) |
+| `catalog_pool_size` | (= `pool_size`) | Maximum connections for management/authz pool (minimum: 10) |
 
 #### [auth]
 

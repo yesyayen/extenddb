@@ -1262,9 +1262,9 @@ The `--yes` flag is required to confirm destruction. Without it, the command exi
 
 ### Connection pool size
 
-The `storage.postgres.pool_size` setting (default: 20) controls the maximum number of concurrent PostgreSQL connections used for DynamoDB data operations. Each in-flight request that touches the database holds one connection for the duration of its transaction.
+The `storage.postgres.pool_size` setting (default: 20, minimum: 10) controls the maximum number of concurrent PostgreSQL connections used for DynamoDB data operations. Each in-flight request that touches the database holds one connection for the duration of its transaction. Values below 10 are clamped at startup with a warning.
 
-The `storage.postgres.catalog_pool_size` setting controls the maximum number of concurrent connections for the management/catalog pool (authorization queries, IAM operations, console). Defaults to `pool_size` if not set. With auth enabled (`provider = "builtin"`), each DynamoDB request makes concurrent authorization queries against this pool — size it to match expected concurrency.
+The `storage.postgres.catalog_pool_size` setting controls the maximum number of concurrent connections for the management/catalog pool (authorization queries, IAM operations, console). Defaults to `pool_size` if not set, minimum: 10. With auth enabled (`provider = "builtin"`), each DynamoDB request makes concurrent authorization queries against this pool — size it to match expected concurrency. Values below 10 are clamped at startup with a warning.
 
 **When to increase:** If you see elevated latency under concurrent load, the pool may be saturated. Requests queue at the pool level when all connections are in use. Increase `pool_size` (and `catalog_pool_size` if auth is enabled) to allow more concurrent transactions.
 

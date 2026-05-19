@@ -116,6 +116,13 @@ use sqlx::postgres::PgPoolOptions;
 /// wherever a string representation is needed.
 pub const CATALOG_VERSION: CatalogVersion = CatalogVersion::new(0, 0, 2);
 
+/// Minimum number of connections allowed per pool.
+///
+/// Each DynamoDB request triggers an auth/authz query fanout against the
+/// catalog pool. Pools smaller than this floor starve under concurrent load.
+/// Configured values below the floor are clamped at startup with a warning.
+const MIN_POOL_SIZE: u32 = 10;
+
 /// `PostgreSQL` storage backend configuration.
 pub struct PostgresConfig {
     pub connection_string: String,
@@ -152,10 +159,25 @@ pub struct PostgresEngine {
 
 impl PostgresEngine {
     pub async fn new(config: &PostgresConfig, region: &str) -> Result<Self, StorageError> {
+        // Enforce a minimum of 10 connections per pool. Smaller values starve
+        // the auth/authz query fanout under concurrent load. If the configured
+        // value is below the floor, log a warning and clamp.
+        let pool_size = if config.pool_size < MIN_POOL_SIZE {
+            tracing::warn!(
+                "storage.postgres.pool_size = {} is below the minimum of {}; clamping to {}",
+                config.pool_size,
+                MIN_POOL_SIZE,
+                MIN_POOL_SIZE
+            );
+            MIN_POOL_SIZE
+        } else {
+            config.pool_size
+        };
+
         // P79/P6: Set min_connections to avoid cold-start latency on first requests.
-        let min_conns = config.pool_size.min(2);
+        let min_conns = pool_size.min(2);
         let pool = PgPoolOptions::new()
-            .max_connections(config.pool_size)
+            .max_connections(pool_size)
             .min_connections(min_conns)
             .test_before_acquire(false)
             .max_lifetime(std::time::Duration::from_secs(1800))
@@ -172,7 +194,7 @@ impl PostgresEngine {
         .await
         {
             Ok(Some((data_conn,))) if !data_conn.is_empty() => PgPoolOptions::new()
-                .max_connections(config.pool_size)
+                .max_connections(pool_size)
                 .min_connections(min_conns)
                 .test_before_acquire(false)
                 .max_lifetime(std::time::Duration::from_secs(1800))
@@ -388,6 +410,7 @@ inventory::submit! {
         factory: |config, region| {
             let connection_string = config.connection_config().to_string();
             let max_connections = config.max_connections();
+            let max_catalog_connections = config.max_catalog_connections();
             let region = region.to_string();
             Box::pin(async move {
                 // Build PostgresConfig from extracted values
@@ -440,8 +463,20 @@ inventory::submit! {
                 // Wrap engine in Arc
                 let engine = Arc::new(engine);
 
-                // Create catalog store
-                let catalog_pool_size = max_connections.min(10);
+                // Create catalog store. Honors storage.postgres.catalog_pool_size,
+                // defaulting to pool_size when unset. Clamped to the same minimum
+                // as the engine pool.
+                let catalog_pool_size = if max_catalog_connections < MIN_POOL_SIZE {
+                    tracing::warn!(
+                        "storage.postgres.catalog_pool_size = {} is below the minimum of {}; clamping to {}",
+                        max_catalog_connections,
+                        MIN_POOL_SIZE,
+                        MIN_POOL_SIZE
+                    );
+                    MIN_POOL_SIZE
+                } else {
+                    max_catalog_connections
+                };
                 let catalog_pool = PgPoolOptions::new()
                     .max_connections(catalog_pool_size)
                     .min_connections(catalog_pool_size.min(2))
