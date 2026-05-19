@@ -15,16 +15,11 @@
 #   enabled     — Set to false to skip without removing the entry
 
 [[suite]]
-name = "DynamoDB PostgreSQL Extension Functional Tests"
-path = "~/source/DynamoDBPostgreSQLExtensionFunctionalTest"
+name = "A Random Functional Test Suite"
+path = "~/source/FunctionalTestSuite"
 runner = "maven"
 enabled = true
 
 [suite.env]
 DDB_ENDPOINT = "${EXTENDDB_ENDPOINT}"
 
-[[suite]]
-name = "BigBird Functional Test Request Router"
-path = "~/source/BigBirdFunctionalTestRequestRouter"
-runner = "gradle"
-enabled = false  # Requires Brazil build system — not runnable externally

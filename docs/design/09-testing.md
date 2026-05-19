@@ -19,14 +19,9 @@ This document defines extenddb's test strategy: how tests are organized, what re
 
 ## 3. Reference Suites
 
-### 3.1 Two-Tier Reference Strategy
+### 3.1 Reference Strategy
 
-extenddb uses two external test suites as coverage maps — sources of *what to test*, not *how to implement*.
-
-| Suite | Role | Granularity | Priority |
-|-------|------|-------------|----------|
-| DynamoDBPostgreSQLExtensionFunctionalTest | Primary reference. Curated for PostgreSQL-backed DynamoDB. ~530 test methods across 25 test classes. | Per-method | High |
-| BigBirdFunctionalTestRequestRouter | Secondary reference. Broad DynamoDB coverage (~339 files). Consulted for edge cases beyond the PostgreSQL suite's scope. | Per-class | Medium |
+extenddb uses test suites as a coverage map — a source of *what to test*, not *how to implement*. The test suites are not included here.
 
 ### 3.2 Arm's-Length Boundary (MF-1)
 
@@ -43,7 +38,7 @@ Concretely:
 - The test organization structure (how tests are grouped)
 
 **Never referenced:**
-- Specific assertion values, expected error messages, or HTTP status codes from either suite
+- Specific assertion values, expected error messages, or HTTP status codes from any suite
 - Internal DynamoDB implementation details revealed by test setup
 - Test infrastructure code (base classes, helpers, utilities)
 - Any code referencing internal-only APIs or features
@@ -52,31 +47,24 @@ Concretely:
 
 ### 3.3 Tracking Upstream Changes
 
-Each reference suite's analyzed git hash is stored in `tests/reference/`:
+The reference suite's analyzed git hash is stored in `tests/reference/`:
 
 ```
 tests/reference/
-├── postgres-ext-hash.txt    # e.g. d604a1fe4e21881dda2427ff6165e4e69e89a9fb
-├── bigbird-hash.txt         # e.g. 6073571ec53173371b2527a0e06785946eeee2c8
+├── suite-hash.txt           # e.g. 1a2b3c4d1a2b3c4d1a2b3c4d1a2b3c4d1a2b3c4d
 ├── check-upstream.sh        # Diff script
 └── coverage-map.md          # Test scenario inventory
 ```
 
-`check-upstream.sh` compares stored hashes against current HEAD of each repo, diffs the file list, and reports new/modified/deleted test files. New files in the PostgreSQL extension suite are flagged as high-priority (likely test behaviors extenddb must support). New files in BigBird are informational (may test internal-only features). The script distinguishes between the two (SF-3).
+`check-upstream.sh` compares the stored hash against current HEAD of the reference repo, diffs the file list, and reports new/modified/deleted test files. New files are flagged as high-priority (likely test behaviors extenddb must support).
 
 When new tests appear upstream, a developer reviews them for new scenarios to add to the coverage map. This is a manual review process, not automated ingestion.
 
 ### 3.4 Coverage Map (MF-2)
 
-The coverage map (`tests/reference/coverage-map.md`) tracks which reference suite scenarios have corresponding extenddb tests. It has two sections:
+The coverage map (`tests/reference/coverage-map.md`) tracks which reference suite scenarios have corresponding extenddb tests. Every test method maps to an extenddb test scenario at per-method granularity.
 
-1. **PostgreSQL extension suite** — per-method granularity. Every test method maps to a extenddb test scenario.
-2. **BigBird suite** — per-class granularity. Filled in incrementally as phases progress.
-
-The coverage map is a living document, not a prerequisite:
-- The PostgreSQL extension suite map is built first (smaller, more relevant)
-- The BigBird map starts as a class-level skeleton, filled in as phases progress
-- Neither map blocks Phase 1 implementation — they are updated alongside development
+The coverage map is a living document, not a prerequisite — it is updated alongside development and does not block Phase 1 implementation.
 
 ## 4. Multi-Language Test Suites
 
@@ -133,8 +121,7 @@ tests/
 │   ├── CMakeLists.txt
 │   └── src/
 ├── reference/                 # Coverage tracking
-│   ├── postgres-ext-hash.txt
-│   ├── bigbird-hash.txt
+│   ├── suite-hash.txt
 │   ├── check-upstream.sh
 │   └── coverage-map.md
 └── README.md                 # How to run tests, add tests, capture golden files
@@ -308,7 +295,7 @@ The PostgreSQL extension suite identified test categories the original implement
 
 ### 8.1 PartiQL (Q-5, N-3)
 
-BigBird has extensive PartiQL tests. PartiQL is deferred to post-v1 (Phase 15+). It requires a separate parser and execution engine. The BigBird PartiQL tests are useful reference material when that time comes.
+PartiQL is deferred to post-v1 (Phase 15+). It requires a separate parser and execution engine.
 
 ### 8.2 CI Infrastructure (Q-4)
 
