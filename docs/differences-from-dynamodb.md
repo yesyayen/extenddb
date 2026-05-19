@@ -9,17 +9,16 @@ adaptation when switching between ExtendDB and the real service.
 | Area | DynamoDB | ExtendDB |
 |------|----------|------|
 | Storage backend | Proprietary distributed storage | PostgreSQL |
-| Backup/Restore | CreateBackup, RestoreTableFromBackup | Implemented: CreateBackup, DescribeBackup, ListBackups, DeleteBackup, RestoreTableFromBackup. Backups are stored as PostgreSQL table snapshots. DescribeContinuousBackups and UpdateContinuousBackups are implemented (track PITR enabled/disabled flag). RestoreTableToPointInTime returns an unsupported error — true point-in-time recovery is not implemented. |
 | Global Tables | CreateGlobalTable, replication | Not implemented (returns UnknownOperationException) |
 | DAX (Accelerator) | In-memory caching layer | Not applicable |
 | PartiQL | ExecuteStatement, BatchExecuteStatement | Not implemented (returns UnknownOperationException) |
 
-## Authentication and Authorization
+## Authentication and Authorization (AWS IAM/STS auth surface used by DynamoDB)
 
 | Area | DynamoDB | ExtendDB |
 |------|----------|------|
 | Credential management | AWS IAM console/API | `extenddb manage` CLI and `/management` REST API |
-| Access key prefixes | `AKIA` (long-term), `ASIA` (session) | `AKIAEXTENDDB` (long-term), `ASIAEXTENDDB` (session) |
+| Access key prefixes | `AKIA` (long-term), `ASIA` (session) AWS-wide IAM/STS conventions | `AKIAEXTENDDB` (long-term), `ASIAEXTENDDB` (session) |
 | Federated roles | AssumeRoleWithSAML, AssumeRoleWithWebIdentity | Not implemented |
 | Role chaining | Supported | Not implemented |
 | SourceIdentity, TransitiveTagKeys | Supported | Not implemented |
@@ -40,7 +39,7 @@ adaptation when switching between ExtendDB and the real service.
 
 | Area | DynamoDB | ExtendDB |
 |------|----------|------|
-| Table creation delay | Immediate for on-demand, seconds for provisioned | Configurable via `control_plane_delay_seconds` runtime setting (default: 5s) |
+| Table creation delay | Returns `CREATING` immediately; transitions to `ACTIVE` typically within seconds. Same behavior for on-demand and provisioned | Configurable via `control_plane_delay_seconds` runtime setting (default: 5s) |
 | DeletionProtectionEnabled | Enforced | Enforced (accepted and stored, DeleteTable rejects when enabled) |
 
 ## Time to Live (TTL)
@@ -71,7 +70,7 @@ adaptation when switching between ExtendDB and the real service.
 |------|----------|------|
 | Provisioned throughput | Token bucket per table/partition | Token bucket per table/partition, matching DynamoDB's burst and refill behavior |
 | On-demand capacity | Automatic scaling | Fixed initial burst capacity (4000 WCU / 12000 RCU), no auto-scaling |
-| Throttling | Enabled by default | Configurable via `throttling_enabled` runtime setting (default: `true`) |
+| Throttling | Always on; throttles requests that exceed provisioned/burst capacity. No setting to disable | Configurable via `throttling_enabled` runtime setting (default: `true`) |
 
 ## Operations Not Implemented
 
