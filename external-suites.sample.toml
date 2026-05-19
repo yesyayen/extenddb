@@ -1,0 +1,32 @@
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+# ExtendDB external test suite registry - sample template
+#
+# Copy this file to external-suites.toml and edit as needed to add additional,
+# project- or organization-specific test suites. To execute a configured test
+# suite, run:
+#   devtools/run-tests --extenddb --external
+#
+# Each [[suite]] entry describes an external test suite that can be run against extenddb.
+# Suites are referenced by path — never copied into the repo.
+#
+# Fields:
+#   name        — Human-readable name (used in reports)
+#   path        — Absolute path or ~ path to the suite root directory
+#   runner      — Build/test tool: "maven", "gradle", "pytest", "cargo"
+#   env         — Environment variables passed to the test runner
+#   args        — Extra arguments passed to the test command
+#   prereqs     — Commands that must succeed for the suite to be runnable
+#   enabled     — Set to false to skip without removing the entry
+
+# Configure a test suite.
+# [[suite]]
+# name = "My Additional Function Tests"
+# path = "~/source/tests/functional/FunctionalTests"
+# runner = "maven"
+# enabled = true
+
+# Configure environment variables needed by your test suites.
+# [suite.env]
+# DDB_ENDPOINT = "${EXTENDDB_ENDPOINT}"
+
