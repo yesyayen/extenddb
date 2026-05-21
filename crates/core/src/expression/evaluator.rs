@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use crate::error::DynamoDbError;
 use crate::types::AttributeValue;
 
-use super::ast::{CompareOp, Expr};
+use super::ast::{CompareOp, Expr, PathElement};
 use super::resolver::{ExpressionMaps, resolve_path};
 
 /// Evaluate a condition expression against an item.
@@ -258,6 +258,21 @@ fn evaluate_function(
                     "Invalid ConditionExpression: contains requires exactly two arguments"
                         .to_owned(),
                 ));
+            }
+            if args[0] == args[1] {
+                let operand_str = match &args[0] {
+                    Expr::Path(p) => {
+                        let parts: Vec<String> = p.iter().map(|e| match e {
+                            PathElement::Attribute(a) => a.clone(),
+                            PathElement::Index(i) => format!("[{i}]"),
+                        }).collect();
+                        format!("[{}]", parts.join("."))
+                    }
+                    _ => String::new(),
+                };
+                return Err(DynamoDbError::ValidationException(format!(
+                    "Invalid ConditionExpression: The first operand must be distinct from the remaining operands for this operator or function; operator: contains, first operand: {operand_str}"
+                )));
             }
             let val = resolve_to_value(&args[0], item, maps)?;
             let operand = resolve_to_value(&args[1], item, maps)?;
