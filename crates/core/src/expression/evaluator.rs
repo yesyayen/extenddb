@@ -301,7 +301,7 @@ fn evaluate_size<'a>(
         return Ok(None);
     };
     let sz = match v.as_ref() {
-        AttributeValue::S(s) => s.len(),
+        AttributeValue::S(s) => s.encode_utf16().count(),
         AttributeValue::B(b) => b.len(),
         AttributeValue::N(n) => n.len(), // ASCII digits are 1 byte each, so len() == UTF-8 byte count
         AttributeValue::L(l) => l.len(),

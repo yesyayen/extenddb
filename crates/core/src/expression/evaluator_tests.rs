@@ -224,6 +224,16 @@ fn size_function_in_comparison() {
 }
 
 #[test]
+fn size_function_uses_utf16_code_units() {
+    // "é" = 1 UTF-16 code unit, "𝄞" = 2 UTF-16 code units (surrogate pair) → total 3
+    let mut item = BTreeMap::new();
+    item.insert("s".into(), AttributeValue::S("é𝄞".into()));
+    let mut values = HashMap::new();
+    values.insert("n".into(), AttributeValue::N("3".into()));
+    assert!(eval("size(s) = :n", &item, HashMap::new(), values).unwrap());
+}
+
+#[test]
 fn attribute_type_check() {
     let item = simple_item();
     let mut values = HashMap::new();
