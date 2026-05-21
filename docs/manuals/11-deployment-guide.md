@@ -78,46 +78,58 @@ extenddb init \
 
 ### Containerized
 
-extenddb runs in Docker or Kubernetes. The binary has no runtime dependencies beyond libc and network access to PostgreSQL.
+ExtendDB ships an OCI container image. The image runs `extenddb serve`
+only: operators bootstrap the deployment by running `extenddb init`
+separately, then mount the resulting `extenddb.toml` as a config volume.
 
-Example Dockerfile:
+A `Dockerfile` and a Docker Compose demo live in the repository:
 
-```dockerfile
-# Match rust-version in Cargo.toml
-FROM rust:1.85 AS builder
-WORKDIR /src
-COPY . .
-RUN cargo build --release
+- [`Dockerfile`](../../Dockerfile) at the repo root: multi-stage build,
+  `debian:bookworm-slim` runtime, non-root user, tini as PID 1.
+- [`samples/docker/compose.yaml`](../../samples/docker/compose.yaml):
+  PostgreSQL plus an idempotent `extenddb-init` one-shot plus the
+  long-running `extenddb` service.
+- [`samples/docker/bootstrap-iam.sh`](../../samples/docker/bootstrap-iam.sh):
+  helper script that creates an IAM user with full DynamoDB access and
+  emits a `extenddb-creds.env` ready to `source`.
+- [`samples/docker/README.md`](../../samples/docker/README.md): full
+  walkthrough including the AWS CLI smoke test.
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates tini && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /src/target/release/extenddb /usr/local/bin/extenddb
-COPY extenddb.toml /etc/extenddb/extenddb.toml
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
-EXPOSE 8000
-ENTRYPOINT ["tini", "--"]
-CMD ["/usr/local/bin/entrypoint.sh"]
-```
-
-extenddb always daemonizes (there is no foreground mode). In a container, the parent process exits after forking, which causes the container runtime to stop the container. Use `tini` as PID 1 and a wrapper script that starts extenddb and waits on the daemon process:
+For a minute-long evaluation:
 
 ```bash
-#!/bin/sh
-# entrypoint.sh
-extenddb serve --config /etc/extenddb/extenddb.toml
-# Wait on the daemon PID — the PID file location depends on run_dir in extenddb.toml
-# Default: ~/.extenddb/run/extenddb-<port>.pid
-PID_FILE="${HOME}/.extenddb/run/extenddb-8000.pid"
-if [ -f "$PID_FILE" ]; then
-  tail --pid="$(cat "$PID_FILE")" -f /dev/null
-else
-  echo "extenddb failed to start — PID file not found at $PID_FILE" >&2
-  exit 1
-fi
+cd samples/docker
+docker compose -f compose.yaml -f compose.dev.yaml up --build -d
+./bootstrap-iam.sh
+source ./extenddb-creds.env
+aws dynamodb list-tables --endpoint-url "$EXTENDDB_ENDPOINT"
 ```
 
-For Kubernetes, run `extenddb init` as an init container or a one-time Job, then deploy extenddb as a Deployment with the generated `extenddb.toml` mounted as a ConfigMap or Secret.
+For production, do not use the demo `compose.yaml` as-is: passwords
+are hard-coded and the cert is self-signed. Use it as a reference and
+supply your own values.
+
+#### Daemonization in containers
+
+`extenddb serve` always daemonizes. The container entrypoint script
+(`docker/entrypoint.sh`) runs `serve`, waits for the daemon's PID file
+to appear, then polls the daemon process and forwards SIGTERM/SIGINT
+for graceful shutdown. `docker stop` triggers a clean shutdown
+(verified to return exit 0 well within the default 10 second grace
+period).
+
+#### Kubernetes
+
+For Kubernetes deployments:
+
+- Run `extenddb init` as an `initContainer` or one-time `Job` against a
+  PersistentVolumeClaim that holds `extenddb.toml`.
+- Run `extenddb serve` as the main container in a `Deployment`,
+  mounting the same PVC at `/etc/extenddb/extenddb.toml` (or use a
+  ConfigMap / Secret for the rendered config).
+- Use a `livenessProbe` / `readinessProbe` against
+  `https://<pod-ip>:8000/health` (with `httpHeaders` skipping TLS
+  verification, or with the cert mounted from a Secret).
 
 ### Air-Gapped
 

@@ -1,0 +1,25 @@
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Dev overlay for the demo compose file. Builds the image from the
+# repository root instead of pulling from GHCR.
+#
+# Usage:
+#   cd samples/docker
+#   docker compose -f compose.yaml -f compose.dev.yaml up --build
+#
+# The init and extenddb services share the same image, so they share
+# the same `build:` block via YAML anchors.
+
+services:
+  extenddb-init:
+    image: extenddb:dev
+    build: &extenddb-build
+      context: ../..
+      dockerfile: Dockerfile
+      tags:
+        - extenddb:dev
+
+  extenddb:
+    image: extenddb:dev
+    build: *extenddb-build

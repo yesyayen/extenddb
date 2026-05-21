@@ -47,6 +47,21 @@ scripts/install-linux.sh   # Linux
 scripts/install-macos.sh   # macOS
 ```
 
+### Run with Docker
+
+A Docker Compose stack brings up PostgreSQL and ExtendDB end-to-end:
+
+```bash
+cd samples/docker
+docker compose -f compose.yaml -f compose.dev.yaml up --build -d
+./bootstrap-iam.sh                          # creates an IAM user + access key
+source ./extenddb-creds.env
+aws dynamodb list-tables --endpoint-url "$EXTENDDB_ENDPOINT"
+```
+
+See [`samples/docker/README.md`](samples/docker/README.md) for the full
+walkthrough.
+
 ## Prerequisites
 
 - Rust 1.85+ (`rustup update`)

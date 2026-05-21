@@ -1,0 +1,91 @@
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Demo compose file for running ExtendDB locally with PostgreSQL.
+#
+# Usage (after `docker compose pull`, or with EXTENDDB_IMAGE pointing at a
+# locally-built tag):
+#
+#   cd samples/docker
+#   docker compose up
+#
+# The init service runs `extenddb init` once. The extenddb service starts
+# only after init has succeeded. State persists in named volumes; running
+# `docker compose up` again is idempotent (init detects existing config
+# and skips).
+#
+# Tear down everything (including data):
+#   docker compose down -v
+#
+# Capture the admin password (only printed if you do NOT pass
+# EXTENDDB_ADMIN_PASSWORD as an env var):
+#   docker compose logs extenddb-init | grep -A4 'Admin credentials'
+#
+# This compose file is intentionally minimal. For production, see
+# docs/manuals/11-deployment-guide.md.
+
+name: extenddb
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      # PostgreSQL admin user. ExtendDB will create its own application
+      # user and databases via `extenddb init`. Do not pre-create
+      # extenddb_catalog or extenddb here. `init` is responsible for both.
+      POSTGRES_PASSWORD: postgres-local-dev
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  # One-shot bootstrap. Runs `extenddb init` once, exits 0. The shell guard
+  # makes a second `docker compose up` a no-op rather than failing on the
+  # existing config file.
+  extenddb-init:
+    image: ${EXTENDDB_IMAGE:-ghcr.io/extenddb/extenddb:latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Admin credentials. If unset, init generates and prints a password.
+      EXTENDDB_ADMIN_USER: admin
+      EXTENDDB_ADMIN_PASSWORD: admin-local-dev-password
+    volumes:
+      - extenddb-config:/etc/extenddb
+      - extenddb-state:/var/lib/extenddb
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -f /etc/extenddb/extenddb.toml ]; then
+          echo "extenddb.toml already present, skipping init."
+          exit 0
+        fi
+        exec /usr/local/bin/extenddb init \
+          --config /etc/extenddb/extenddb.toml \
+          --pg-host postgres --pg-port 5432 \
+          --pg-user postgres --pg-pass postgres-local-dev \
+          --extenddb-user extenddb --extenddb-pass extenddb-local-dev \
+          --bind-addr 0.0.0.0 \
+          --no-overwrite
+    restart: "no"
+
+  extenddb:
+    image: ${EXTENDDB_IMAGE:-ghcr.io/extenddb/extenddb:latest}
+    depends_on:
+      extenddb-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${EXTENDDB_HOST_PORT:-8000}:8000"
+    volumes:
+      - extenddb-config:/etc/extenddb
+      - extenddb-state:/var/lib/extenddb
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  extenddb-config:
+  extenddb-state:

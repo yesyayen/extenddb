@@ -1,0 +1,44 @@
+# Build artifacts
+target/
+**/target/
+
+# Local environments
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Generated / runtime
+*.log
+discussions/
+docs/pdfs/
+docs/rendered/
+pdfs/
+
+# Local config (must NOT be baked into the image; mounted at /etc/extenddb)
+extenddb.toml
+external-suites.toml
+
+# Tests are not needed for the runtime image. The Dockerfile build stage
+# uses cargo workspace metadata only; integration tests run separately.
+tests/
+
+# Container artifacts (avoid recursive context inclusion)
+# We DO want docker/entrypoint.sh in the context — only ignore the Dockerfile
+# itself and the samples/docker dir, which holds compose and demo docs.
+Dockerfile
+.dockerignore
+samples/docker/
+
+# VCS
+#  .git/ is intentionally NOT ignored: crates/bin/build.rs runs `git rev-parse`
+#  during the build stage to bake the commit hash into the binary. Excluding
+#  .git would yield `commit unknown` in `extenddb version`.
+.github/
