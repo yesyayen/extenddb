@@ -242,6 +242,15 @@ fn evaluate_function(
             }
             let val = resolve_to_value(&args[0], item, maps)?;
             let prefix = resolve_to_value(&args[1], item, maps)?;
+            // Reject invalid operand types — only S and B are allowed
+            if let Some(ref p) = prefix.as_deref() {
+                if !matches!(p, AttributeValue::S(_) | AttributeValue::B(_)) {
+                    let type_code = attribute_type_code(p);
+                    return Err(DynamoDbError::ValidationException(format!(
+                        "Invalid ConditionExpression: Incorrect operand type for operator or function; operator or function: begins_with, operand type: {type_code}"
+                    )));
+                }
+            }
             match (val.as_deref(), prefix.as_deref()) {
                 (Some(AttributeValue::S(s)), Some(AttributeValue::S(p))) => {
                     Ok(s.starts_with(p.as_str()))

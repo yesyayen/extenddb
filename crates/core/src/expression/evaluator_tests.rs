@@ -153,6 +153,17 @@ fn begins_with_false() {
 }
 
 #[test]
+fn begins_with_rejects_number_operand() {
+    let item = simple_item();
+    let mut values = HashMap::new();
+    values.insert("p".into(), AttributeValue::N("1".into()));
+    let result = eval("begins_with(name, :p)", &item, HashMap::new(), values);
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("operand type: N"));
+}
+
+#[test]
 fn contains_string_substring() {
     let item = simple_item();
     let mut values = HashMap::new();
