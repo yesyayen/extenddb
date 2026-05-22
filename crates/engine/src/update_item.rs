@@ -121,17 +121,21 @@ pub async fn handle_update_item(
         &ctx.limits,
     )?;
 
-    // Parse the update expression
-    let update_expr = effective_update_expr.as_deref().unwrap_or("");
-    let update_tokens = tokenize_for(
-        update_expr,
-        ctx.limits.max_expression_tokens,
-        "UpdateExpression",
-    )?;
-    if ctx.limits.enforce_reserved_keywords {
-        validate_no_reserved_words(&update_tokens)?;
-    }
-    let actions = parse_update_from(&update_tokens, update_expr)?;
+    // No UpdateExpression and no AttributeUpdates: no-op upsert.
+    // Some("") still errors via tokenize_for.
+    let actions = if let Some(update_expr) = effective_update_expr.as_deref() {
+        let update_tokens = tokenize_for(
+            update_expr,
+            ctx.limits.max_expression_tokens,
+            "UpdateExpression",
+        )?;
+        if ctx.limits.enforce_reserved_keywords {
+            validate_no_reserved_words(&update_tokens)?;
+        }
+        parse_update_from(&update_tokens, update_expr)?
+    } else {
+        Vec::new()
+    };
 
     if input.expected.is_none() || input.expected.as_ref().is_some_and(|m| m.is_empty()) {
         let exprs: Vec<&extenddb_core::expression::Expr> = condition.iter().collect();

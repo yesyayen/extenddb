@@ -395,6 +395,34 @@ class TestUpdateItem:
             )
         assert exc_info.value.response["Error"]["Code"] == "ValidationException"
 
+    def test_update_item_no_directives_upserts_key_only(self, dynamodb_client, upd_table):
+        """UpdateItem with only TableName + Key on a missing item upserts a key-only item."""
+        dynamodb_client.update_item(
+            TableName=upd_table,
+            Key={"pk": {"S": "noop-missing"}},
+        )
+        resp = dynamodb_client.get_item(
+            TableName=upd_table,
+            Key={"pk": {"S": "noop-missing"}},
+            ConsistentRead=True,
+        )
+        assert resp["Item"] == {"pk": {"S": "noop-missing"}}
+
+    def test_update_item_no_directives_noop_on_existing(self, dynamodb_client, upd_table):
+        """UpdateItem with only TableName + Key on an existing item is a no-op."""
+        original = {"pk": {"S": "noop-existing"}, "x": {"N": "42"}}
+        dynamodb_client.put_item(TableName=upd_table, Item=original)
+        dynamodb_client.update_item(
+            TableName=upd_table,
+            Key={"pk": {"S": "noop-existing"}},
+        )
+        resp = dynamodb_client.get_item(
+            TableName=upd_table,
+            Key={"pk": {"S": "noop-existing"}},
+            ConsistentRead=True,
+        )
+        assert resp["Item"] == original
+
     def test_update_item_condition_on_nonexistent_item(self, dynamodb_client, upd_table):
         """attribute_not_exists on a missing item succeeds (creates the item)."""
         dynamodb_client.update_item(
