@@ -1,0 +1,32 @@
+# CODEOWNERS — auto-requests reviewers and (with branch protection enabled)
+# requires their approval to merge.
+#
+# Order matters: the LAST matching pattern wins.
+# Syntax: <path-glob>   <owner1> <owner2> ...
+#
+# To enforce: in repo Settings → Branches → branch protection rule for `main`,
+# enable "Require review from Code Owners".
+
+# Default — any file not matched below.
+*                              @amrith @c33howard @jcshepherd @pdf-amzn
+
+# Wire protocol & DynamoDB-compatible API surface.
+crates/server/                 @amrith @c33howard @jcshepherd @pdf-amzn
+crates/core/                   @amrith @c33howard @jcshepherd @pdf-amzn
+
+# Storage abstraction — breaking changes ripple to every backend.
+crates/storage/                @amrith @c33howard @jcshepherd @pdf-amzn
+crates/storage-postgres/       @amrith @c33howard @jcshepherd @pdf-amzn
+crates/engine/                 @amrith @c33howard @jcshepherd @pdf-amzn
+
+# Auth & SigV4 — security-sensitive.
+crates/auth/                   @amrith @c33howard @jcshepherd @pdf-amzn
+
+# Public CLI surface.
+crates/bin/                    @amrith @c33howard @jcshepherd @pdf-amzn
+
+# Process & governance documents.
+docs/adr/                      @amrith @c33howard @jcshepherd @pdf-amzn
+docs/rfcs/                     @amrith @c33howard @jcshepherd @pdf-amzn
+CONTRIBUTING.md                @amrith @c33howard @jcshepherd @pdf-amzn
+.github/                       @amrith @c33howard @jcshepherd @pdf-amzn

@@ -195,6 +195,21 @@ Build PDFs:
 python3 docs/build-docs.py
 ```
 
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for build,
+test, and code-style requirements.
+
+ExtendDB uses two lightweight processes for tracking decisions:
+
+- **[ADRs](docs/adr/README.md)** record decisions that have been made.
+- **[RFCs](docs/rfcs/README.md)** propose changes that affect the wire protocol,
+  storage trait, auth model, on-disk format, public CLI, or any significant
+  new feature or subsystem. Substantial changes go through an RFC before
+  implementation.
+
+Code in protected paths is reviewed via [`.github/CODEOWNERS`](.github/CODEOWNERS).
+
 ## License
 
 Copyright 2026 ExtendDB contributors. Licensed under the Apache License, Version 2.0.
