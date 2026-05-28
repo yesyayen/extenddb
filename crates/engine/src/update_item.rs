@@ -196,12 +196,12 @@ pub async fn handle_update_item(
         ReturnValues::None => None,
         ReturnValues::AllOld => old_item,
         ReturnValues::AllNew => new_item,
-        ReturnValues::UpdatedOld => {
-            old_item.map(|item| filter_to_updated_attrs(&item, &actions, &maps))
-        }
-        ReturnValues::UpdatedNew => {
-            new_item.map(|item| filter_to_updated_attrs(&item, &actions, &maps))
-        }
+        ReturnValues::UpdatedOld => old_item
+            .map(|item| filter_to_updated_attrs(&item, &actions, &maps))
+            .filter(|item| !item.is_empty()),
+        ReturnValues::UpdatedNew => new_item
+            .map(|item| filter_to_updated_attrs(&item, &actions, &maps))
+            .filter(|item| !item.is_empty()),
     };
 
     let output = UpdateItemOutput {
