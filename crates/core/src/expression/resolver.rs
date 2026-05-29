@@ -288,6 +288,46 @@ fn collect_expr_refs(
     }
 }
 
+/// Walk an `Expr` tree and append every `Expr::Placeholder(name)` reference to `out`.
+///
+/// Used by `UpdateItem` depth validation: for each `SET` action's right-hand
+/// side, collect the EAV placeholders referenced (directly or via
+/// `if_not_exists`, `list_append`, arithmetic, etc.). Resolving those names
+/// against the `ExpressionMaps` yields the set of attribute values that will
+/// be stored, so their nesting depth must be validated.
+pub fn collect_value_placeholders(expr: &super::ast::Expr, out: &mut Vec<String>) {
+    use super::ast::Expr;
+    match expr {
+        Expr::Placeholder(name) => out.push(name.clone()),
+        Expr::Path(_) => {}
+        Expr::Compare { left, right, .. } | Expr::Arithmetic { left, right, .. } => {
+            collect_value_placeholders(left, out);
+            collect_value_placeholders(right, out);
+        }
+        Expr::And(l, r) | Expr::Or(l, r) => {
+            collect_value_placeholders(l, out);
+            collect_value_placeholders(r, out);
+        }
+        Expr::Not(inner) => collect_value_placeholders(inner, out),
+        Expr::Function { args, .. } => {
+            for a in args {
+                collect_value_placeholders(a, out);
+            }
+        }
+        Expr::Between { operand, low, high } => {
+            collect_value_placeholders(operand, out);
+            collect_value_placeholders(low, out);
+            collect_value_placeholders(high, out);
+        }
+        Expr::In { operand, list } => {
+            collect_value_placeholders(operand, out);
+            for i in list {
+                collect_value_placeholders(i, out);
+            }
+        }
+    }
+}
+
 fn collect_action_refs(
     action: &super::ast::UpdateAction,
     names: &mut std::collections::HashSet<String>,
@@ -411,7 +451,7 @@ pub fn validate_begins_with_operands(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::expression::ast::Expr;
+    use crate::expression::ast::{ArithOp, Expr, PathElement};
     use crate::expression::parser::parse_condition;
     use crate::expression::tokenizer::tokenize;
     use std::collections::BTreeSet;
@@ -533,5 +573,73 @@ mod tests {
         let maps = maps_with("n", AttributeValue::N("1".into()));
         let err = validate_begins_with_operands(&expr, &maps).unwrap_err();
         assert!(err.to_string().contains("operand type: N"));
+    }
+
+    fn placeholder(s: &str) -> Expr {
+        Expr::Placeholder(s.to_owned())
+    }
+
+    #[test]
+    fn collect_value_placeholders_finds_direct_reference() {
+        let mut out = Vec::new();
+        collect_value_placeholders(&placeholder(":d"), &mut out);
+        assert_eq!(out, vec![":d".to_owned()]);
+    }
+
+    #[test]
+    fn collect_value_placeholders_walks_function_args() {
+        // SET v = if_not_exists(path, :default)
+        let expr = Expr::Function {
+            name: "if_not_exists".to_owned(),
+            args: vec![
+                Expr::Path(vec![PathElement::Attribute("path".to_owned())]),
+                placeholder(":default"),
+            ],
+        };
+        let mut out = Vec::new();
+        collect_value_placeholders(&expr, &mut out);
+        assert_eq!(out, vec![":default".to_owned()]);
+    }
+
+    #[test]
+    fn collect_value_placeholders_walks_arithmetic() {
+        // SET v = :a + :b
+        let expr = Expr::Arithmetic {
+            left: Box::new(placeholder(":a")),
+            op: ArithOp::Add,
+            right: Box::new(placeholder(":b")),
+        };
+        let mut out = Vec::new();
+        collect_value_placeholders(&expr, &mut out);
+        assert_eq!(out, vec![":a".to_owned(), ":b".to_owned()]);
+    }
+
+    #[test]
+    fn collect_value_placeholders_walks_nested_function() {
+        // SET v = list_append(:base, list_append(:extra, :more))
+        let expr = Expr::Function {
+            name: "list_append".to_owned(),
+            args: vec![
+                placeholder(":base"),
+                Expr::Function {
+                    name: "list_append".to_owned(),
+                    args: vec![placeholder(":extra"), placeholder(":more")],
+                },
+            ],
+        };
+        let mut out = Vec::new();
+        collect_value_placeholders(&expr, &mut out);
+        assert_eq!(
+            out,
+            vec![":base".to_owned(), ":extra".to_owned(), ":more".to_owned()]
+        );
+    }
+
+    #[test]
+    fn collect_value_placeholders_path_only_yields_nothing() {
+        let expr = Expr::Path(vec![PathElement::Attribute("address".to_owned())]);
+        let mut out = Vec::new();
+        collect_value_placeholders(&expr, &mut out);
+        assert!(out.is_empty());
     }
 }

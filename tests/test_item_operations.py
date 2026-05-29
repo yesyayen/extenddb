@@ -9,6 +9,8 @@ REQ-TEST-001, REQ-TEST-002, REQ-TEST-003, REQ-TEST-004
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from botocore.exceptions import ClientError
 
@@ -500,6 +502,272 @@ class TestUpdateItem:
             ReturnValues="UPDATED_NEW",
         )
         assert "Attributes" not in resp, f"expected Attributes omitted, got {resp.get('Attributes')!r}"
+
+
+class TestNestingDepth:
+    """Amazon DynamoDB rejects items whose Map/List values nest beyond 32 levels.
+
+    Each `M` or `L` wrapper counts as one level; scalar leaves do not. The
+    cap applies to top-level item attributes (`PutItem`, `BatchWriteItem`,
+    `TransactWriteItems.Put`) and to attribute values introduced through
+    `UpdateItem.AttributeUpdates` and `UpdateItem.ExpressionAttributeValues`.
+    """
+
+    @pytest.fixture(scope="class")
+    def nest_table(self, dynamodb_client):
+        with scoped_table(dynamodb_client) as name:
+            yield name
+
+    @staticmethod
+    def _deep_map(depth: int):
+        leaf = {"S": "leaf"}
+        for _ in range(depth):
+            leaf = {"M": {"a": leaf}}
+        return leaf
+
+    @staticmethod
+    def _deep_list(depth: int):
+        leaf = {"S": "leaf"}
+        for _ in range(depth):
+            leaf = {"L": [leaf]}
+        return leaf
+
+    def test_put_item_at_limit_accepted(self, dynamodb_client, nest_table):
+        """PutItem with a Map nested 31 levels deep (32 total levels) is accepted."""
+        dynamodb_client.put_item(
+            TableName=nest_table,
+            Item={"pk": {"S": "at-limit"}, "deep": self._deep_map(31)},
+        )
+
+    def test_put_item_one_over_limit_map_rejected(self, dynamodb_client, nest_table):
+        """PutItem with a Map nested 32 levels deep (33 total levels) returns ValidationException."""
+        with pytest.raises(ClientError) as exc_info:
+            dynamodb_client.put_item(
+                TableName=nest_table,
+                Item={"pk": {"S": "over-map"}, "deep": self._deep_map(32)},
+            )
+        err = exc_info.value.response["Error"]
+        assert err["Code"] == "ValidationException"
+        assert "Nesting Levels have exceeded supported limits" in err["Message"]
+
+    def test_put_item_one_over_limit_list_rejected(self, dynamodb_client, nest_table):
+        """PutItem with a List nested 32 levels deep returns ValidationException."""
+        with pytest.raises(ClientError) as exc_info:
+            dynamodb_client.put_item(
+                TableName=nest_table,
+                Item={"pk": {"S": "over-list"}, "deep": self._deep_list(32)},
+            )
+        assert exc_info.value.response["Error"]["Code"] == "ValidationException"
+
+    def test_update_item_attribute_updates_one_over_limit_rejected(
+        self, dynamodb_client, nest_table
+    ):
+        """UpdateItem AttributeUpdates PUT with 32-deep Map returns ValidationException."""
+        dynamodb_client.put_item(TableName=nest_table, Item={"pk": {"S": "upd-au"}})
+        with pytest.raises(ClientError) as exc_info:
+            dynamodb_client.update_item(
+                TableName=nest_table,
+                Key={"pk": {"S": "upd-au"}},
+                AttributeUpdates={
+                    "deep": {"Action": "PUT", "Value": self._deep_map(32)}
+                },
+            )
+        assert exc_info.value.response["Error"]["Code"] == "ValidationException"
+
+    def test_update_item_set_deep_eav_rejected(self, dynamodb_client, nest_table):
+        """UpdateItem with SET path = :d where :d is 32-deep is rejected.
+
+        The deep value goes into a stored attribute, so Amazon DynamoDB rejects.
+        Regression guard: prior to the engine-side walker that resolves SET
+        action placeholders against ExpressionAttributeValues, this case slipped
+        through ExtendDB's validation while Amazon DynamoDB rejected.
+        """
+        dynamodb_client.put_item(TableName=nest_table, Item={"pk": {"S": "upd-set"}})
+        with pytest.raises(ClientError) as exc_info:
+            dynamodb_client.update_item(
+                TableName=nest_table,
+                Key={"pk": {"S": "upd-set"}},
+                UpdateExpression="SET deep = :d",
+                ExpressionAttributeValues={":d": self._deep_map(32)},
+            )
+        assert exc_info.value.response["Error"]["Code"] == "ValidationException"
+
+    def test_update_item_set_if_not_exists_deep_eav_rejected(
+        self, dynamodb_client, nest_table
+    ):
+        """SET path = if_not_exists(path, :d) with deep :d is rejected.
+
+        Walker-coverage: the EAV reference is nested inside a function call.
+        """
+        dynamodb_client.put_item(TableName=nest_table, Item={"pk": {"S": "upd-ine"}})
+        with pytest.raises(ClientError) as exc_info:
+            dynamodb_client.update_item(
+                TableName=nest_table,
+                Key={"pk": {"S": "upd-ine"}},
+                UpdateExpression="SET deep = if_not_exists(deep, :d)",
+                ExpressionAttributeValues={":d": self._deep_map(32)},
+            )
+        assert exc_info.value.response["Error"]["Code"] == "ValidationException"
+
+    def test_batch_write_item_put_one_over_limit_rejected(
+        self, dynamodb_client, nest_table
+    ):
+        """BatchWriteItem PutRequest with 32-deep Map returns ValidationException."""
+        with pytest.raises(ClientError) as exc_info:
+            dynamodb_client.batch_write_item(
+                RequestItems={
+                    nest_table: [
+                        {
+                            "PutRequest": {
+                                "Item": {
+                                    "pk": {"S": "batch-over"},
+                                    "deep": self._deep_map(32),
+                                }
+                            }
+                        }
+                    ]
+                }
+            )
+        assert exc_info.value.response["Error"]["Code"] == "ValidationException"
+
+    def test_transact_write_items_put_one_over_limit_rejected(
+        self, dynamodb_client, nest_table
+    ):
+        """TransactWriteItems Put with 32-deep Map returns ValidationException."""
+        with pytest.raises(ClientError) as exc_info:
+            dynamodb_client.transact_write_items(
+                TransactItems=[
+                    {
+                        "Put": {
+                            "TableName": nest_table,
+                            "Item": {
+                                "pk": {"S": "twi-over"},
+                                "deep": self._deep_map(32),
+                            },
+                        }
+                    }
+                ]
+            )
+        assert exc_info.value.response["Error"]["Code"] == "ValidationException"
+
+    def test_put_item_deep_eav_in_condition_accepted(self, dynamodb_client, nest_table):
+        """PutItem with a deep value in EAV used only by ConditionExpression is accepted.
+
+        Amazon DynamoDB only validates depth on values that get *stored* as item
+        attributes. Condition-only EAV passes through.
+        """
+        unique = "cond-pk-" + uuid.uuid4().hex[:8]
+        dynamodb_client.put_item(
+            TableName=nest_table,
+            Item={"pk": {"S": unique}},
+            ConditionExpression="attribute_not_exists(pk) OR :d = :d",
+            ExpressionAttributeValues={":d": self._deep_map(32)},
+        )
+
+    def test_delete_item_deep_eav_in_condition_accepted(self, dynamodb_client, nest_table):
+        """DeleteItem with a deep value in EAV used only by ConditionExpression is accepted."""
+        unique = "cond-del-" + uuid.uuid4().hex[:8]
+        dynamodb_client.put_item(TableName=nest_table, Item={"pk": {"S": unique}})
+        dynamodb_client.delete_item(
+            TableName=nest_table,
+            Key={"pk": {"S": unique}},
+            ConditionExpression="attribute_exists(pk) OR :d = :d",
+            ExpressionAttributeValues={":d": self._deep_map(32)},
+        )
+
+    def test_update_item_deep_eav_in_condition_accepted(self, dynamodb_client, nest_table):
+        """UpdateItem with a deep value in EAV used only by ConditionExpression is accepted.
+
+        The SET target is a shallow scalar; the deep `:d` is referenced only by
+        the ConditionExpression and never stored.
+        """
+        unique = "cond-upd-" + uuid.uuid4().hex[:8]
+        dynamodb_client.put_item(TableName=nest_table, Item={"pk": {"S": unique}})
+        dynamodb_client.update_item(
+            TableName=nest_table,
+            Key={"pk": {"S": unique}},
+            UpdateExpression="SET myattr = :s",
+            ConditionExpression=":d = :d",
+            ExpressionAttributeValues={":s": {"S": "x"}, ":d": self._deep_map(32)},
+        )
+
+    def test_update_item_legacy_expected_with_deep_value_accepted(
+        self, dynamodb_client, nest_table
+    ):
+        """UpdateItem legacy `Expected.<n>.Value` carrying a deep value is not depth-validated.
+
+        Amazon DynamoDB lets the request through validation. The condition itself
+        fails at evaluation (ConditionalCheckFailedException), which is fine for
+        this assertion: what we are guarding against is `ValidationException` for
+        nesting depth, not the condition outcome.
+        """
+        unique = "exp-upd-" + uuid.uuid4().hex[:8]
+        dynamodb_client.put_item(TableName=nest_table, Item={"pk": {"S": unique}})
+        try:
+            dynamodb_client.update_item(
+                TableName=nest_table,
+                Key={"pk": {"S": unique}},
+                AttributeUpdates={"myattr": {"Action": "PUT", "Value": {"S": "x"}}},
+                Expected={"deep": {"Value": self._deep_map(32)}},
+            )
+        except ClientError as e:
+            err = e.response["Error"]
+            assert err["Code"] != "ValidationException", (
+                f"Expected condition with deep value should not be a ValidationException: {err}"
+            )
+
+    def test_transact_write_items_condition_check_deep_eav_accepted(
+        self, dynamodb_client, nest_table
+    ):
+        """TransactWriteItems ConditionCheck with a deep value in EAV is accepted."""
+        unique = "twi-cc-" + uuid.uuid4().hex[:8]
+        dynamodb_client.put_item(TableName=nest_table, Item={"pk": {"S": unique}})
+        dynamodb_client.transact_write_items(
+            TransactItems=[
+                {
+                    "ConditionCheck": {
+                        "TableName": nest_table,
+                        "Key": {"pk": {"S": unique}},
+                        "ConditionExpression": "attribute_exists(pk) OR :d = :d",
+                        "ExpressionAttributeValues": {":d": self._deep_map(32)},
+                    }
+                }
+            ]
+        )
+
+    def test_put_item_31_wrappers_around_set_leaf_accepted(self, dynamodb_client, nest_table):
+        """31 `M` wrappers around a number-set leaf (32 total levels) is accepted.
+
+        Set types (NS/SS/BS) count as scalar leaves: the recursion does not
+        descend into their members for nesting-depth purposes.
+        """
+        leaf = {"NS": ["1", "2", "3"]}
+        for _ in range(31):
+            leaf = {"M": {"a": leaf}}
+        dynamodb_client.put_item(
+            TableName=nest_table,
+            Item={"pk": {"S": "set-leaf-31"}, "deep": leaf},
+        )
+
+    def test_put_item_multiple_top_level_attributes_one_over_rejected(
+        self, dynamodb_client, nest_table
+    ):
+        """PutItem rejects when any single top-level attribute exceeds the limit.
+
+        Guards that the recursion visits every top-level attribute, not just the
+        first one.
+        """
+        with pytest.raises(ClientError) as exc_info:
+            dynamodb_client.put_item(
+                TableName=nest_table,
+                Item={
+                    "pk": {"S": "multi-over"},
+                    "shallow_a": {"S": "x"},
+                    "deep": self._deep_map(32),
+                    "shallow_b": {"N": "1"},
+                },
+            )
+        assert exc_info.value.response["Error"]["Code"] == "ValidationException"
 
 
 # ---------------------------------------------------------------------------

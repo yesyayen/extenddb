@@ -459,6 +459,7 @@ pub fn validate_put_item(
     validate_item_keys(&input.item, key_schema, attr_defs)?;
     validate_attribute_name_sizes(&input.item, limits)?;
     validate_item_numbers(&input.item)?;
+    validate_item_nesting_depth(&input.item)?;
 
     let size = item_size_bytes(&input.item);
     if size > limits.max_item_size_bytes {
@@ -535,6 +536,11 @@ pub fn validate_update_item(
 ) -> Result<(), DynamoDbError> {
     validate_table_name(&input.table_name, limits)?;
     validate_key_only(&input.key, key_schema, attr_defs)?;
+
+    if let Some(updates) = &input.attribute_updates {
+        validate_attribute_values_nesting_depth(updates.values().filter_map(|u| u.value.as_ref()))?;
+    }
+
     Ok(())
 }
 
@@ -835,6 +841,63 @@ fn validate_attribute_number(value: &AttributeValue) -> Result<(), DynamoDbError
         _ => {}
     }
     Ok(())
+}
+
+/// Maximum total nesting levels (M/L wrappers plus the leaf) DynamoDB allows.
+pub(crate) const MAX_ITEM_NESTING_DEPTH: usize = 32;
+
+/// Validate that no attribute value in `item` nests beyond `MAX_ITEM_NESTING_DEPTH`.
+pub fn validate_item_nesting_depth(item: &Item) -> Result<(), DynamoDbError> {
+    for value in item.values() {
+        check_attribute_value_depth(value, 0)?;
+    }
+    Ok(())
+}
+
+/// Validate nesting depth on attribute values introduced outside of an `Item`
+/// (`ExpressionAttributeValues`, `AttributeUpdates`, `Expected`).
+pub fn validate_attribute_values_nesting_depth<'a, I>(values: I) -> Result<(), DynamoDbError>
+where
+    I: IntoIterator<Item = &'a AttributeValue>,
+{
+    for v in values {
+        check_attribute_value_depth(v, 0)?;
+    }
+    Ok(())
+}
+
+fn check_attribute_value_depth(
+    value: &AttributeValue,
+    current_depth: usize,
+) -> Result<(), DynamoDbError> {
+    match value {
+        AttributeValue::M(map) => {
+            let next = current_depth + 1;
+            if next >= MAX_ITEM_NESTING_DEPTH {
+                return Err(nesting_depth_error());
+            }
+            for v in map.values() {
+                check_attribute_value_depth(v, next)?;
+            }
+        }
+        AttributeValue::L(list) => {
+            let next = current_depth + 1;
+            if next >= MAX_ITEM_NESTING_DEPTH {
+                return Err(nesting_depth_error());
+            }
+            for v in list {
+                check_attribute_value_depth(v, next)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn nesting_depth_error() -> DynamoDbError {
+    DynamoDbError::ValidationException(
+        "Nesting Levels have exceeded supported limits: Attributes in the item have nested levels beyond supported limit".to_owned(),
+    )
 }
 
 fn validate_unique_index_names(input: &CreateTableInput) -> Result<(), DynamoDbError> {
@@ -1229,5 +1292,149 @@ mod tests {
         let mut input = update_input_no_directives();
         input.update_expression = Some(String::new());
         assert!(validate_update_item(&input, &limits, &key_schema, &attr_defs).is_ok());
+    }
+
+    fn nested_map(depth: usize) -> AttributeValue {
+        let mut leaf = AttributeValue::S("leaf".to_owned());
+        for _ in 0..depth {
+            let mut m = std::collections::BTreeMap::new();
+            m.insert("a".to_owned(), leaf);
+            leaf = AttributeValue::M(m);
+        }
+        leaf
+    }
+
+    fn nested_list(depth: usize) -> AttributeValue {
+        let mut leaf = AttributeValue::S("leaf".to_owned());
+        for _ in 0..depth {
+            leaf = AttributeValue::L(vec![leaf]);
+        }
+        leaf
+    }
+
+    #[test]
+    fn nesting_depth_at_limit_accepted() {
+        // 31 wrappers + leaf = 32 total levels, DynamoDB's hard cap.
+        let mut item = Item::new();
+        item.insert("deep".to_owned(), nested_map(MAX_ITEM_NESTING_DEPTH - 1));
+        validate_item_nesting_depth(&item).expect("32 total levels must be accepted");
+    }
+
+    #[test]
+    fn nesting_depth_one_over_limit_rejected_for_map() {
+        let mut item = Item::new();
+        item.insert("deep".to_owned(), nested_map(MAX_ITEM_NESTING_DEPTH));
+        let err = validate_item_nesting_depth(&item).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Nesting Levels have exceeded supported limits"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn nesting_depth_one_over_limit_rejected_for_list() {
+        let mut item = Item::new();
+        item.insert("deep".to_owned(), nested_list(MAX_ITEM_NESTING_DEPTH));
+        let err = validate_item_nesting_depth(&item).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Nesting Levels have exceeded supported limits"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn nesting_depth_mixed_map_and_list_counted_together() {
+        let mut leaf = AttributeValue::S("leaf".to_owned());
+        for i in 0..MAX_ITEM_NESTING_DEPTH {
+            leaf = if i % 2 == 0 {
+                AttributeValue::L(vec![leaf])
+            } else {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert("a".to_owned(), leaf);
+                AttributeValue::M(m)
+            };
+        }
+        let mut item = Item::new();
+        item.insert("deep".to_owned(), leaf);
+        let err = validate_item_nesting_depth(&item).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Nesting Levels have exceeded supported limits"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn nesting_depth_attribute_values_iterator_at_limit_accepted() {
+        let v = nested_map(MAX_ITEM_NESTING_DEPTH - 1);
+        validate_attribute_values_nesting_depth(std::iter::once(&v))
+            .expect("32 total levels via iterator must be accepted");
+    }
+
+    #[test]
+    fn nesting_depth_attribute_values_iterator_one_over_rejected() {
+        let v = nested_map(MAX_ITEM_NESTING_DEPTH);
+        let err = validate_attribute_values_nesting_depth(std::iter::once(&v)).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Nesting Levels have exceeded supported limits"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn nesting_depth_visits_all_top_level_attributes() {
+        // Only one of three top-level attributes is over the limit. The
+        // recursion must inspect every attribute and reject.
+        let mut item = Item::new();
+        item.insert("shallow_a".to_owned(), AttributeValue::S("a".to_owned()));
+        item.insert("deep".to_owned(), nested_map(MAX_ITEM_NESTING_DEPTH));
+        item.insert("shallow_b".to_owned(), AttributeValue::N("42".to_owned()));
+        let err = validate_item_nesting_depth(&item).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Nesting Levels have exceeded supported limits"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn nesting_depth_visits_all_map_children() {
+        // A wide Map: many children, only one is over the limit.
+        let mut wide = std::collections::BTreeMap::new();
+        wide.insert("a".to_owned(), AttributeValue::S("x".to_owned()));
+        wide.insert("b".to_owned(), nested_map(MAX_ITEM_NESTING_DEPTH - 1));
+        wide.insert("c".to_owned(), nested_map(MAX_ITEM_NESTING_DEPTH));
+        wide.insert("d".to_owned(), AttributeValue::N("1".to_owned()));
+        let mut item = Item::new();
+        item.insert("wide".to_owned(), AttributeValue::M(wide));
+        let err = validate_item_nesting_depth(&item).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Nesting Levels have exceeded supported limits"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn nesting_depth_visits_all_list_elements() {
+        // A wide List: many elements, only one element is over the limit.
+        let wide = vec![
+            AttributeValue::S("x".to_owned()),
+            nested_map(MAX_ITEM_NESTING_DEPTH - 1),
+            AttributeValue::Bool(true),
+            nested_map(MAX_ITEM_NESTING_DEPTH),
+            AttributeValue::N("3".to_owned()),
+        ];
+        let mut item = Item::new();
+        item.insert("wide".to_owned(), AttributeValue::L(wide));
+        let err = validate_item_nesting_depth(&item).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Nesting Levels have exceeded supported limits"),
+            "unexpected error: {err}"
+        );
     }
 }
