@@ -19,7 +19,7 @@ A DynamoDB-compatible API adapter, ExtendDB speaks the DynamoDB wire protocol â€
 - Web management console for account and credential administration
 - TLS with automatic self-signed certificate generation (replaceable with CA-signed certs)
 - CSRF protection, security headers, session management
-- Prometheus-compatible metrics endpoint
+- JSON metrics endpoint with DynamoDB CloudWatch-style metric names and dimensions
 - Daemon mode with syslog logging
 - PostgreSQL storage â€” use standard backup, replication, and HA tools
 
@@ -110,7 +110,7 @@ key_path = "/etc/extenddb/tls/key.pem"
 # Health check
 curl --cacert ~/.extenddb/tls/cert.pem https://127.0.0.1:8000/health
 
-# Prometheus metrics
+# JSON metrics (DynamoDB CloudWatch-style)
 curl --cacert ~/.extenddb/tls/cert.pem https://127.0.0.1:8000/metrics
 
 # Syslog (Linux)
