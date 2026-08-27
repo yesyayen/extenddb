@@ -300,6 +300,132 @@ assert.ok(
   "oversized UpdateItem should be rejected with ValidationException",
 );
 
+// --- Vector index + SearchVectors (engine path) ---
+
+const vecCreated = call("CreateTable", {
+  TableName: "Vecs",
+  KeySchema: [{ AttributeName: "pk", KeyType: "HASH" }],
+  AttributeDefinitions: [{ AttributeName: "pk", AttributeType: "S" }],
+  BillingMode: "PAY_PER_REQUEST",
+  VectorIndexes: [
+    {
+      IndexName: "vidx",
+      Dimensions: 3,
+      DistanceFunction: "COSINE",
+      VectorAttribute: { AttributeName: "emb" },
+      Projection: { ProjectionType: "ALL" },
+    },
+  ],
+});
+// The index is ACTIVE at birth: no control plane, nothing to backfill.
+assert.strictEqual(vecCreated.TableDescription.VectorIndexes.length, 1);
+assert.strictEqual(vecCreated.TableDescription.VectorIndexes[0].IndexStatus, "ACTIVE");
+const vecDesc = call("DescribeTable", { TableName: "Vecs" });
+assert.strictEqual(vecDesc.Table.VectorIndexes[0].IndexName, "vidx");
+assert.strictEqual(vecDesc.Table.VectorIndexes[0].Dimensions, 3);
+
+const embeddings = {
+  east: ["1", "0", "0"],
+  north: ["0", "1", "0"],
+  northeastish: ["0.6", "0.8", "0"],
+};
+for (const [pk, comps] of Object.entries(embeddings)) {
+  call("PutItem", {
+    TableName: "Vecs",
+    Item: { pk: { S: pk }, emb: { L: comps.map((n) => ({ N: n })) } },
+  });
+}
+// An item without the vector attribute never enters the index.
+call("PutItem", { TableName: "Vecs", Item: { pk: { S: "novec" } } });
+
+// Nearest neighbours of [1,0,0], most similar first (cosine: smaller = closer).
+const sv = call("SearchVectors", {
+  TableName: "Vecs",
+  IndexName: "vidx",
+  SearchVector: [{ N: "1" }, { N: "0" }, { N: "0" }],
+  TopK: 2,
+});
+assert.deepStrictEqual(
+  sv.SearchResults.map((r) => r.Item.pk.S),
+  ["east", "northeastish"],
+);
+// A self-match scores exactly 0 from above (the clamp), never negative.
+assert.ok(sv.SearchResults[0].Score === 0, "self-match must score 0");
+assert.ok(sv.SearchResults[1].Score > 0 && sv.SearchResults[1].Score < 1);
+// The vector attribute is withheld unless a ProjectionExpression names it.
+assert.strictEqual(sv.SearchResults[0].Item.emb, undefined);
+
+// TopK larger than the item count returns every indexed item, ordered.
+const svAll = call("SearchVectors", {
+  TableName: "Vecs",
+  IndexName: "vidx",
+  SearchVector: [{ N: "1" }, { N: "0" }, { N: "0" }],
+  TopK: 100,
+});
+assert.deepStrictEqual(
+  svAll.SearchResults.map((r) => r.Item.pk.S),
+  ["east", "northeastish", "north"],
+  "TopK > item count must return all indexed items (novec excluded)",
+);
+
+// Naming the vector attribute in a ProjectionExpression returns it.
+const svProj = call("SearchVectors", {
+  TableName: "Vecs",
+  IndexName: "vidx",
+  SearchVector: [{ N: "1" }, { N: "0" }, { N: "0" }],
+  TopK: 1,
+  ProjectionExpression: "pk, emb",
+});
+assert.deepStrictEqual(svProj.SearchResults[0].Item.emb.L.map((v) => v.N), ["1", "0", "0"]);
+
+// The write paths maintain the index: a delete leaves the index too.
+call("DeleteItem", { TableName: "Vecs", Key: { pk: { S: "east" } } });
+const svAfterDelete = call("SearchVectors", {
+  TableName: "Vecs",
+  IndexName: "vidx",
+  SearchVector: [{ N: "1" }, { N: "0" }, { N: "0" }],
+  TopK: 100,
+});
+assert.deepStrictEqual(
+  svAfterDelete.SearchResults.map((r) => r.Item.pk.S),
+  ["northeastish", "north"],
+);
+
+// And an UpdateItem re-ranks: north moves next to the query vector.
+call("UpdateItem", {
+  TableName: "Vecs",
+  Key: { pk: { S: "north" } },
+  UpdateExpression: "SET emb = :v",
+  ExpressionAttributeValues: { ":v": { L: [{ N: "0.9" }, { N: "0.1" }, { N: "0" }] } },
+});
+const svAfterUpdate = call("SearchVectors", {
+  TableName: "Vecs",
+  IndexName: "vidx",
+  SearchVector: [{ N: "1" }, { N: "0" }, { N: "0" }],
+  TopK: 100,
+});
+assert.deepStrictEqual(
+  svAfterUpdate.SearchResults.map((r) => r.Item.pk.S),
+  ["north", "northeastish"],
+);
+
+// A wrong-dimension query is refused, not answered.
+const svBadDims = JSON.parse(
+  dispatch(
+    "DynamoDB_20120810.SearchVectors",
+    JSON.stringify({
+      TableName: "Vecs",
+      IndexName: "vidx",
+      SearchVector: [{ N: "1" }, { N: "0" }],
+      TopK: 1,
+    }),
+  ),
+);
+assert.ok(
+  String(svBadDims.__type).includes("ValidationException"),
+  "dimension mismatch must be a ValidationException, got " + JSON.stringify(svBadDims),
+);
+
 console.log(
-  "M2c smoke test PASSED: Create/Describe/List, Put/Get, Update(SET)+Condition, Query(order/begins_with/range), Scan(+Limit/ESK), pagination-resume-after-delete, DeleteItem(ALL_OLD), DeleteTable OK",
+  "M2c smoke test PASSED: Create/Describe/List, Put/Get, Update(SET)+Condition, Query(order/begins_with/range), Scan(+Limit/ESK), pagination-resume-after-delete, DeleteItem(ALL_OLD), DeleteTable, vector index + SearchVectors OK",
 );

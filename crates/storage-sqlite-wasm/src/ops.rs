@@ -508,6 +508,11 @@ impl SqliteWasmEngine {
         }
         // DynamoDB returns the table with DELETING status.
         desc.table_status = TableStatus::Deleting;
+        // The native backend's DeleteTable echo carries no VectorIndexes member
+        // (its delete path builds the description without attaching them, where
+        // DescribeTable does). Matched here so the two backends answer the
+        // sequence identically; the parity golden pins this.
+        desc.vector_indexes = None;
         Ok(desc)
     }
 

@@ -1,0 +1,583 @@
+[
+  {
+    "body": {
+      "TableDescription": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "pk",
+            "AttributeType": "S"
+          }
+        ],
+        "BillingModeSummary": {
+          "BillingMode": "PAY_PER_REQUEST",
+          "LastUpdateToPayPerRequestDateTime": 0
+        },
+        "CreationDateTime": 0,
+        "DeletionProtectionEnabled": false,
+        "ItemCount": 0,
+        "KeySchema": [
+          {
+            "AttributeName": "pk",
+            "KeyType": "HASH"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "NumberOfDecreasesToday": 0,
+          "ReadCapacityUnits": 0,
+          "WriteCapacityUnits": 0
+        },
+        "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/VP_Cosine",
+        "TableId": "MASKED",
+        "TableName": "VP_Cosine",
+        "TableSizeBytes": 0,
+        "TableStatus": "ACTIVE",
+        "VectorIndexes": [
+          {
+            "Dimensions": 3,
+            "DistanceFunction": "COSINE",
+            "IndexArn": "arn:aws:dynamodb:us-east-1:000000000000:table/VP_Cosine/index/vidx",
+            "IndexName": "vidx",
+            "IndexSizeBytes": 0,
+            "IndexStatus": "ACTIVE",
+            "ItemCount": 0,
+            "Projection": {
+              "ProjectionType": "ALL"
+            },
+            "VectorAttribute": {
+              "AttributeName": "emb"
+            }
+          }
+        ]
+      }
+    },
+    "status": 200,
+    "target": "CreateTable"
+  },
+  {
+    "body": {
+      "Table": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "pk",
+            "AttributeType": "S"
+          }
+        ],
+        "BillingModeSummary": {
+          "BillingMode": "PAY_PER_REQUEST",
+          "LastUpdateToPayPerRequestDateTime": 0
+        },
+        "CreationDateTime": 0,
+        "DeletionProtectionEnabled": false,
+        "ItemCount": 0,
+        "KeySchema": [
+          {
+            "AttributeName": "pk",
+            "KeyType": "HASH"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "NumberOfDecreasesToday": 0,
+          "ReadCapacityUnits": 0,
+          "WriteCapacityUnits": 0
+        },
+        "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/VP_Cosine",
+        "TableId": "MASKED",
+        "TableName": "VP_Cosine",
+        "TableSizeBytes": 0,
+        "TableStatus": "ACTIVE",
+        "VectorIndexes": [
+          {
+            "Dimensions": 3,
+            "DistanceFunction": "COSINE",
+            "IndexArn": "arn:aws:dynamodb:us-east-1:000000000000:table/VP_Cosine/index/vidx",
+            "IndexName": "vidx",
+            "IndexSizeBytes": 0,
+            "IndexStatus": "ACTIVE",
+            "ItemCount": 0,
+            "Projection": {
+              "ProjectionType": "ALL"
+            },
+            "VectorAttribute": {
+              "AttributeName": "emb"
+            }
+          }
+        ]
+      }
+    },
+    "status": 200,
+    "target": "DescribeTable"
+  },
+  {
+    "body": {},
+    "status": 200,
+    "target": "PutItem"
+  },
+  {
+    "body": {},
+    "status": 200,
+    "target": "PutItem"
+  },
+  {
+    "body": {},
+    "status": 200,
+    "target": "PutItem"
+  },
+  {
+    "body": {},
+    "status": 200,
+    "target": "PutItem"
+  },
+  {
+    "body": {
+      "SearchResults": [
+        {
+          "Item": {
+            "genre": {
+              "S": "x"
+            },
+            "pk": {
+              "S": "a"
+            }
+          },
+          "Score": 0.0
+        },
+        {
+          "Item": {
+            "pk": {
+              "S": "c"
+            }
+          },
+          "Score": 0.3999999904632572
+        }
+      ]
+    },
+    "status": 200,
+    "target": "SearchVectors"
+  },
+  {
+    "body": {
+      "SearchResults": [
+        {
+          "Item": {
+            "genre": {
+              "S": "x"
+            },
+            "pk": {
+              "S": "a"
+            }
+          },
+          "Score": 0.0
+        },
+        {
+          "Item": {
+            "pk": {
+              "S": "c"
+            }
+          },
+          "Score": 0.3999999904632572
+        },
+        {
+          "Item": {
+            "pk": {
+              "S": "b"
+            }
+          },
+          "Score": 1.0
+        }
+      ]
+    },
+    "status": 200,
+    "target": "SearchVectors"
+  },
+  {
+    "body": {
+      "SearchResults": [
+        {
+          "Item": {
+            "emb": {
+              "L": [
+                {
+                  "N": "1"
+                },
+                {
+                  "N": "0"
+                },
+                {
+                  "N": "0"
+                }
+              ]
+            },
+            "pk": {
+              "S": "a"
+            }
+          },
+          "Score": 0.0
+        },
+        {
+          "Item": {
+            "emb": {
+              "L": [
+                {
+                  "N": "0.6"
+                },
+                {
+                  "N": "0.8"
+                },
+                {
+                  "N": "0"
+                }
+              ]
+            },
+            "pk": {
+              "S": "c"
+            }
+          },
+          "Score": 0.3999999904632572
+        },
+        {
+          "Item": {
+            "emb": {
+              "L": [
+                {
+                  "N": "0"
+                },
+                {
+                  "N": "1"
+                },
+                {
+                  "N": "0"
+                }
+              ]
+            },
+            "pk": {
+              "S": "b"
+            }
+          },
+          "Score": 1.0
+        }
+      ]
+    },
+    "status": 200,
+    "target": "SearchVectors"
+  },
+  {
+    "body": {},
+    "status": 200,
+    "target": "UpdateItem"
+  },
+  {
+    "body": {
+      "SearchResults": [
+        {
+          "Item": {
+            "genre": {
+              "S": "x"
+            },
+            "pk": {
+              "S": "a"
+            }
+          },
+          "Score": 0.0
+        },
+        {
+          "Item": {
+            "pk": {
+              "S": "b"
+            }
+          },
+          "Score": 0.20000000715255728
+        },
+        {
+          "Item": {
+            "pk": {
+              "S": "c"
+            }
+          },
+          "Score": 0.3999999904632572
+        }
+      ]
+    },
+    "status": 200,
+    "target": "SearchVectors"
+  },
+  {
+    "body": {},
+    "status": 200,
+    "target": "DeleteItem"
+  },
+  {
+    "body": {
+      "SearchResults": [
+        {
+          "Item": {
+            "pk": {
+              "S": "b"
+            }
+          },
+          "Score": 0.20000000715255728
+        },
+        {
+          "Item": {
+            "pk": {
+              "S": "c"
+            }
+          },
+          "Score": 0.3999999904632572
+        }
+      ]
+    },
+    "status": 200,
+    "target": "SearchVectors"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "Input search vector dimension 2 does not match vector index dimension 3"
+    },
+    "status": 400,
+    "target": "SearchVectors"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "The table does not have the specified index: nosuch"
+    },
+    "status": 400,
+    "target": "SearchVectors"
+  },
+  {
+    "body": {
+      "TableDescription": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "pk",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "tenant",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "category",
+            "AttributeType": "S"
+          }
+        ],
+        "BillingModeSummary": {
+          "BillingMode": "PAY_PER_REQUEST",
+          "LastUpdateToPayPerRequestDateTime": 0
+        },
+        "CreationDateTime": 0,
+        "DeletionProtectionEnabled": false,
+        "ItemCount": 0,
+        "KeySchema": [
+          {
+            "AttributeName": "pk",
+            "KeyType": "HASH"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "NumberOfDecreasesToday": 0,
+          "ReadCapacityUnits": 0,
+          "WriteCapacityUnits": 0
+        },
+        "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/VP_Scoped",
+        "TableId": "MASKED",
+        "TableName": "VP_Scoped",
+        "TableSizeBytes": 0,
+        "TableStatus": "ACTIVE",
+        "VectorIndexes": [
+          {
+            "Dimensions": 2,
+            "DistanceFunction": "EUCLIDEAN",
+            "IndexArn": "arn:aws:dynamodb:us-east-1:000000000000:table/VP_Scoped/index/vidx",
+            "IndexName": "vidx",
+            "IndexSizeBytes": 0,
+            "IndexStatus": "ACTIVE",
+            "ItemCount": 0,
+            "Projection": {
+              "ProjectionType": "ALL"
+            },
+            "SearchSchema": [
+              {
+                "AttributeName": "tenant",
+                "SearchSchemaElementType": "HASH"
+              },
+              {
+                "AttributeName": "category",
+                "SearchSchemaElementType": "INLINE_FILTER"
+              }
+            ],
+            "VectorAttribute": {
+              "AttributeName": "emb"
+            }
+          }
+        ]
+      }
+    },
+    "status": 200,
+    "target": "CreateTable"
+  },
+  {
+    "body": {},
+    "status": 200,
+    "target": "PutItem"
+  },
+  {
+    "body": {},
+    "status": 200,
+    "target": "PutItem"
+  },
+  {
+    "body": {},
+    "status": 200,
+    "target": "PutItem"
+  },
+  {
+    "body": {
+      "SearchResults": [
+        {
+          "Item": {
+            "category": {
+              "S": "books"
+            },
+            "pk": {
+              "S": "p1"
+            },
+            "tenant": {
+              "S": "t1"
+            }
+          },
+          "Score": 0.0
+        },
+        {
+          "Item": {
+            "category": {
+              "S": "electronics"
+            },
+            "pk": {
+              "S": "p2"
+            },
+            "tenant": {
+              "S": "t1"
+            }
+          },
+          "Score": 5.0
+        }
+      ]
+    },
+    "status": 200,
+    "target": "SearchVectors"
+  },
+  {
+    "body": {
+      "SearchResults": [
+        {
+          "Item": {
+            "category": {
+              "S": "books"
+            },
+            "pk": {
+              "S": "p1"
+            },
+            "tenant": {
+              "S": "t1"
+            }
+          },
+          "Score": 0.0
+        }
+      ]
+    },
+    "status": 200,
+    "target": "SearchVectors"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "SearchConditionExpression must be provided when SearchSchema has a HASH key"
+    },
+    "status": 400,
+    "target": "SearchVectors"
+  },
+  {
+    "body": {
+      "TableDescription": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "pk",
+            "AttributeType": "S"
+          }
+        ],
+        "BillingModeSummary": {
+          "BillingMode": "PAY_PER_REQUEST",
+          "LastUpdateToPayPerRequestDateTime": 0
+        },
+        "CreationDateTime": 0,
+        "DeletionProtectionEnabled": false,
+        "ItemCount": 0,
+        "KeySchema": [
+          {
+            "AttributeName": "pk",
+            "KeyType": "HASH"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "NumberOfDecreasesToday": 0,
+          "ReadCapacityUnits": 0,
+          "WriteCapacityUnits": 0
+        },
+        "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/VP_Cosine",
+        "TableId": "MASKED",
+        "TableName": "VP_Cosine",
+        "TableSizeBytes": 0,
+        "TableStatus": "DELETING"
+      }
+    },
+    "status": 200,
+    "target": "DeleteTable"
+  },
+  {
+    "body": {
+      "TableDescription": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "pk",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "tenant",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "category",
+            "AttributeType": "S"
+          }
+        ],
+        "BillingModeSummary": {
+          "BillingMode": "PAY_PER_REQUEST",
+          "LastUpdateToPayPerRequestDateTime": 0
+        },
+        "CreationDateTime": 0,
+        "DeletionProtectionEnabled": false,
+        "ItemCount": 0,
+        "KeySchema": [
+          {
+            "AttributeName": "pk",
+            "KeyType": "HASH"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "NumberOfDecreasesToday": 0,
+          "ReadCapacityUnits": 0,
+          "WriteCapacityUnits": 0
+        },
+        "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/VP_Scoped",
+        "TableId": "MASKED",
+        "TableName": "VP_Scoped",
+        "TableSizeBytes": 0,
+        "TableStatus": "DELETING"
+      }
+    },
+    "status": 200,
+    "target": "DeleteTable"
+  }
+]

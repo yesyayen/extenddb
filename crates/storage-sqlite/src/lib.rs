@@ -44,6 +44,8 @@ mod table_helpers;
 mod update_table;
 mod vector_bench;
 mod vector_search;
+#[cfg(test)]
+mod wasm_parity;
 mod worker;
 mod workers;
 
