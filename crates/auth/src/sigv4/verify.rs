@@ -7,8 +7,8 @@
 //! against the signature in the `Authorization` header using constant-time
 //! comparison to prevent timing attacks.
 
-use axum::http::HeaderMap;
 use extenddb_core::error::DynamoDbError;
+use http::HeaderMap;
 
 use super::canonical;
 use super::parse::ParsedAuthorization;

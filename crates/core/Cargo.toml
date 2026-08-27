@@ -15,3 +15,18 @@ base64 = { workspace = true }
 bigdecimal = { workspace = true }
 time = { workspace = true }
 uuid = { workspace = true }
+
+# wasm32-unknown-unknown needs both features on: uuid does not compile there
+# without a randomness feature, and time's own clock needs js-sys. A target
+# section, not a workspace feature, so upstream changing its own wasm gating
+# cannot leak these into a native build.
+#
+# Neither dependency is used by this crate's source, and both are still
+# load-bearing: every uuid and time consumer in the workspace depends on
+# extenddb-core, so a wasm build unifies the features from here. Do not drop
+# them as unused. The section also does not make extenddb-core run on wasm32:
+# src/metrics and src/throttle call std::time directly, which panics on that
+# target.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+uuid = { workspace = true, features = ["js"] }
+time = { workspace = true, features = ["wasm-bindgen"] }

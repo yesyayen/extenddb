@@ -14,8 +14,8 @@ pub mod sigv4;
 pub use cache_registry::{AuthCacheRegistry, AuthzCacheInvalidator, TableKeyInfoCacheInvalidator};
 pub use credential_cache::CachedCredentialStore;
 
-use axum::http::HeaderMap;
 use extenddb_core::error::DynamoDbError;
+use http::HeaderMap;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Auth provider trait — pluggable authentication.
@@ -214,10 +214,10 @@ impl<C: CredentialStore + 'static> AuthProvider for BuiltinAuthProvider<C> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use axum::http::{HeaderMap, HeaderValue};
+    use http::{HeaderMap, HeaderValue};
 
     /// In-memory credential store for unit tests.
     struct MockCredentialStore {

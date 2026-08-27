@@ -20,7 +20,9 @@ mod describe_table;
 mod expected;
 mod expression_helpers;
 mod get_item;
+#[cfg(not(target_arch = "wasm32"))]
 mod import_export;
+#[cfg(not(target_arch = "wasm32"))]
 mod import_export_io;
 mod index_helpers;
 mod legacy_filter;
@@ -50,6 +52,7 @@ pub use describe_endpoints::handle_describe_endpoints;
 pub use describe_limits::handle_describe_limits;
 pub use describe_table::handle_describe_table;
 pub use get_item::handle_get_item;
+#[cfg(not(target_arch = "wasm32"))]
 pub use import_export::{handle_export_table, handle_import_table};
 pub use list_tables::handle_list_tables;
 pub use put_item::handle_put_item;
@@ -79,47 +82,60 @@ use extenddb_core::limits::LimitsConfig;
 /// not `MissingAuthenticationToken`. The server layer calls this before auth.
 #[must_use]
 pub fn is_known_operation(operation: &str) -> bool {
-    matches!(
-        operation,
-        "CreateTable"
-            | "DeleteTable"
-            | "DescribeTable"
-            | "ListTables"
-            | "UpdateTable"
-            | "DescribeEndpoints"
-            | "DescribeLimits"
-            | "PutItem"
-            | "GetItem"
-            | "DeleteItem"
-            | "UpdateItem"
-            | "Query"
-            | "Scan"
-            | "SearchVectors"
-            | "BatchGetItem"
-            | "BatchWriteItem"
-            | "TransactGetItems"
-            | "TransactWriteItems"
-            | "DescribeTimeToLive"
-            | "UpdateTimeToLive"
-            | "TagResource"
-            | "UntagResource"
-            | "ListTagsOfResource"
-            | "DescribeStream"
-            | "ListStreams"
-            | "GetShardIterator"
-            | "GetRecords"
-            | "ImportTable"
-            | "ExportTableToPointInTime"
-            | "CreateBackup"
-            | "DescribeBackup"
-            | "ListBackups"
-            | "DeleteBackup"
-            | "RestoreTableFromBackup"
-            | "DescribeContinuousBackups"
-            | "UpdateContinuousBackups"
-            | "RestoreTableToPointInTime"
-    )
+    OPERATIONS.contains(&operation) || FILE_OPERATIONS.contains(&operation)
 }
+
+/// The operation names the dispatch table recognizes on every target, one entry
+/// per ungated arm of `dispatch`. A slice rather than a `matches!` pattern so
+/// that entries can be added or withheld per target.
+const OPERATIONS: &[&str] = &[
+    "CreateTable",
+    "DeleteTable",
+    "DescribeTable",
+    "ListTables",
+    "UpdateTable",
+    "DescribeEndpoints",
+    "DescribeLimits",
+    "PutItem",
+    "GetItem",
+    "DeleteItem",
+    "UpdateItem",
+    "Query",
+    "Scan",
+    "SearchVectors",
+    "BatchGetItem",
+    "BatchWriteItem",
+    "TransactGetItems",
+    "TransactWriteItems",
+    "DescribeTimeToLive",
+    "UpdateTimeToLive",
+    "TagResource",
+    "UntagResource",
+    "ListTagsOfResource",
+    "DescribeStream",
+    "ListStreams",
+    "GetShardIterator",
+    "GetRecords",
+    "CreateBackup",
+    "DescribeBackup",
+    "ListBackups",
+    "DeleteBackup",
+    "RestoreTableFromBackup",
+    "DescribeContinuousBackups",
+    "UpdateContinuousBackups",
+    "RestoreTableToPointInTime",
+];
+
+/// The operations whose handlers read or write the local filesystem. Empty on
+/// wasm32, where those handlers are not compiled, so the dispatch table and this
+/// list withhold the same two names.
+#[cfg(not(target_arch = "wasm32"))]
+const FILE_OPERATIONS: &[&str] = &["ImportTable", "ExportTableToPointInTime"];
+#[cfg(target_arch = "wasm32")]
+const FILE_OPERATIONS: &[&str] = &[];
+
+const _: () = assert!(FILE_OPERATIONS.len() == if cfg!(target_arch = "wasm32") { 0 } else { 2 });
+
 use serde::Serialize;
 
 /// Serialize an operation output to JSON, logging and sanitizing any serialization failure.
@@ -442,9 +458,11 @@ pub async fn dispatch(
         "GetRecords" => handle_get_records(body, ctx)
             .await
             .map(DispatchResult::body_only),
+        #[cfg(not(target_arch = "wasm32"))]
         "ImportTable" => handle_import_table(body, ctx)
             .await
             .map(DispatchResult::body_only),
+        #[cfg(not(target_arch = "wasm32"))]
         "ExportTableToPointInTime" => handle_export_table(body, ctx)
             .await
             .map(DispatchResult::body_only),
@@ -473,5 +491,84 @@ pub async fn dispatch(
             .await
             .map(DispatchResult::body_only),
         _ => Err(DynamoDbError::UnknownOperationException(String::new())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FILE_OPERATIONS, OPERATIONS, is_known_operation};
+
+    const GATE: &str = "#[cfg(not(target_arch = \"wasm32\"))]";
+
+    /// Each dispatch arm and whether it carries a gate, read from this file's own
+    /// source rather than from a second hand-written list. Arms are matched at the
+    /// dispatch indent, so a nested match's arms are not counted. Both `expect`
+    /// calls fail loudly if the shape they read moves.
+    fn dispatch_arms() -> Vec<(&'static str, bool)> {
+        let body = include_str!("lib.rs")
+            .split_once("    match operation {")
+            .expect("dispatch match not found")
+            .1
+            .split_once("        _ => Err(")
+            .expect("dispatch wildcard arm not found")
+            .0;
+        let mut arms = Vec::new();
+        let mut previous = "";
+        for line in body.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = line.strip_prefix("        \"")
+                && let Some((name, _)) = rest.split_once("\" =>")
+            {
+                arms.push((name, previous == GATE));
+            }
+            previous = trimmed;
+        }
+        arms
+    }
+
+    #[test]
+    fn ungated_dispatch_arms_are_exactly_operations() {
+        let arms = dispatch_arms();
+        assert_eq!(arms.len(), 37, "dispatch arm count");
+        let mut ungated: Vec<&str> = arms
+            .iter()
+            .filter(|(_, gated)| !gated)
+            .map(|(name, _)| *name)
+            .collect();
+        let mut expected: Vec<&str> = OPERATIONS.to_vec();
+        ungated.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(ungated, expected);
+    }
+
+    #[test]
+    fn gated_dispatch_arms_are_the_file_operations() {
+        let gated: Vec<&str> = dispatch_arms()
+            .iter()
+            .filter(|(_, gated)| *gated)
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(gated, ["ImportTable", "ExportTableToPointInTime"]);
+        assert!(
+            FILE_OPERATIONS.is_empty() || FILE_OPERATIONS == gated.as_slice(),
+            "FILE_OPERATIONS is neither empty nor the gated arms"
+        );
+    }
+
+    #[test]
+    fn the_known_set_has_no_duplicates() {
+        let mut all: Vec<&str> = OPERATIONS.iter().chain(FILE_OPERATIONS).copied().collect();
+        let before = all.len();
+        all.sort_unstable();
+        all.dedup();
+        assert_eq!(all.len(), before);
+    }
+
+    #[test]
+    fn unknown_names_are_not_known() {
+        assert!(is_known_operation("PutItem"));
+        assert!(!is_known_operation("Frobnicate"));
+        assert!(!is_known_operation("putitem"));
+        assert!(!is_known_operation(""));
     }
 }

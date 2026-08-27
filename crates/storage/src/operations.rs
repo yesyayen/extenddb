@@ -50,6 +50,7 @@ pub struct ConnectionParts {
 /// # Errors
 ///
 /// Returns an error if no backend has been installed.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn get_operations_engine() -> Result<&'static dyn OperationsEngine, StorageError> {
     crate::backend::try_backend()
         .map(|b| b.operations)
@@ -63,26 +64,31 @@ pub fn get_operations_engine() -> Result<&'static dyn OperationsEngine, StorageE
 // Convenience functions that delegate to the operations engine
 
 /// Get the catalog version for a backend.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn catalog_version() -> Result<String, StorageError> {
     get_operations_engine().map(OperationsEngine::catalog_version)
 }
 
 /// Redact sensitive information from a connection string.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn redact_connection_string(s: &str) -> Result<String, StorageError> {
     get_operations_engine().map(|ops| ops.redact_connection_string(s))
 }
 
 /// Parse a connection string into components.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn parse_connection_string(s: &str) -> Result<ConnectionParts, StorageError> {
     get_operations_engine()?.parse_connection_string(s)
 }
 
 /// Validate an identifier for DDL safety.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn validate_identifier(name: &str, label: &str) -> Result<(), StorageError> {
     get_operations_engine()?.validate_identifier(name, label)
 }
 
 /// Check if a configuration key contains sensitive data.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn is_sensitive_key(key: &str) -> Result<bool, StorageError> {
     get_operations_engine().map(|ops| ops.is_sensitive_key(key))
 }

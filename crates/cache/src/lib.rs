@@ -38,20 +38,42 @@
 //! need deterministic shutdown should call `invalidate_all` and wait briefly
 //! before dropping the cache; an explicit cancellation token is a future
 //! enhancement.
+//!
+//! # wasm32
+//!
+//! Everything above describes the native build. On wasm32 neither `moka` nor
+//! `tokio` is compiled, and `swr_wasm.rs` supplies the same API as a
+//! pass-through: every `get` calls the loader and every `invalidate*` does
+//! nothing. That is the behaviour of a native cache built with
+//! `SwrCache::pass_through`.
 
 #![forbid(unsafe_code)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+mod shared;
+
+#[cfg(not(target_arch = "wasm32"))]
 mod entry;
+#[cfg(not(target_arch = "wasm32"))]
+mod swr;
+#[cfg(target_arch = "wasm32")]
+#[path = "swr_wasm.rs"]
 mod swr;
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 
-pub use swr::{ConfigError, Loader, SwrCache, SwrCacheConfig, SwrMetrics, SwrMetricsSnapshot};
+pub use shared::{ConfigError, Loader, SwrCacheConfig, SwrMetrics, SwrMetricsSnapshot};
+pub use swr::SwrCache;
 
 /// Re-export of moka's `PredicateError`, returned by `invalidate_if` and
 /// `invalidate_if_value`. Re-exported so callers don't need a direct moka
-/// dependency.
+/// dependency. On wasm32, where moka is not compiled, a local stand-in of the
+/// same name takes its place.
+#[cfg(not(target_arch = "wasm32"))]
 pub use moka::PredicateError;
+/// Local stand-in for moka's `PredicateError`, used where moka is not
+/// compiled. Same name, same variant, never returned: see `swr_wasm.rs`.
+#[cfg(target_arch = "wasm32")]
+pub use swr::PredicateError;

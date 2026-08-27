@@ -72,7 +72,7 @@ pub struct RoleSession {
     /// Effective tags: role tags merged with session tags (session tags win).
     pub tags: HashMap<String, String>,
     pub session_policy: Option<PolicyDocument>,
-    pub expires_at: time::OffsetDateTime,  // `time` crate — already in dependency tree via `axum`
+    pub expires_at: time::OffsetDateTime,  // `time` crate: a direct dependency of this crate
 }
 ```
 

@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use futures::FutureExt;
 
-use crate::swr::{Loader, SwrCache, SwrCacheConfig};
+use crate::{Loader, SwrCache, SwrCacheConfig};
 
 /// Wraps a `Fn` so we can build an `Arc<dyn Fn>` loader inline. The closure
 /// signature `(K) -> impl Future` is wrapped in `boxed()` to satisfy the
@@ -413,7 +413,7 @@ async fn config_default_has_expected_values() {
 // PR1 tests — single-flight, race epochs, panic safety, config validation
 // ─────────────────────────────────────────────────────────────────────
 
-use crate::swr::ConfigError;
+use crate::ConfigError;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn config_validate_rejects_zero_ttl() {
@@ -748,11 +748,18 @@ async fn pass_through_invalidate_is_noop() {
     cache.invalidate(&"k".to_owned()).await;
     cache.invalidate_all();
     cache.invalidate_if(|_: &String| true).unwrap();
+    cache
+        .invalidate_if_value(|_: Option<&String>| true)
+        .unwrap();
 
     assert_eq!(calls.load(Ordering::SeqCst), 1, "1 get call");
     let m = cache.metrics().snapshot();
     // No invalidation counters bumped in pass-through mode (the calls were no-ops).
     assert_eq!(m.invalidations, 0);
+    // Nor the epoch. The wasm32 implementation copies this arm, so these two
+    // assertions are what describes its behaviour: nothing there is executed by
+    // any test suite.
+    assert_eq!(cache.epoch(), 0);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -787,7 +794,7 @@ async fn try_pass_through_validates_config() {
         ..fast_config()
     };
     let result = SwrCache::try_pass_through(loader.into_loader(), bad);
-    assert!(matches!(result, Err(crate::swr::ConfigError::ZeroTtl)));
+    assert!(matches!(result, Err(crate::ConfigError::ZeroTtl)));
 }
 
 /// PR1: hard-miss followers receive a *cloned* error value (via Clone bound),

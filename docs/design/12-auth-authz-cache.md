@@ -280,6 +280,8 @@ The SWR layer is a thin (~80 line) wrapper on top of `moka` that adds the soft-T
 
 The `moka` `future` feature uses `tokio` internals consistent with the rest of the codebase. License is MIT/Apache-2.0 — compatible with our Apache-2.0 license.
 
+This section describes the native build. On `wasm32` neither `moka` nor `tokio` is compiled, and the crate builds a pass-through implementation of the same API instead (`crates/cache/src/swr_wasm.rs`): every lookup calls the loader and every invalidation does nothing. That is the behaviour of a native cache with the kill switch set, `auth.cache.enabled = false`, so the two targets differ in what they cache and not in what they answer.
+
 ## 10. Cache key shapes and value types
 
 ```rust
