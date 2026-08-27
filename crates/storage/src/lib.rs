@@ -40,6 +40,7 @@ pub mod settings_store;
 pub mod transact;
 pub mod vector_catalog;
 pub mod vector_lifecycle;
+pub mod vector_scoring;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use backend::{Backend, BackendAlreadySet, backend_name, set_backend, try_backend};
