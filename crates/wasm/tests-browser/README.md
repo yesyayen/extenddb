@@ -24,6 +24,15 @@ textarea with grouped, bash-formatted sample commands.
   form, insert via CLI, SearchVectors with a picked item or a typed vector,
   ranked results with scores, data-browser pill + truncated vector previews,
   raw JSON + CLI `search-vectors` parity, zero network).
+- `embed.spec.mjs`: the text -> vector semantic-search flow (seeded `Quotes`
+  table with real 384-d sentence embeddings, in-tab lazy model load with a
+  visible status pill, typed query text returning semantically sensible
+  ranked results, a build-time vs in-browser embedding determinism check,
+  add-item-with-text, the embed -> wire vector JSON helper pasted into the
+  CLI, model/dimension pinning with the raw flow kept for other indexes,
+  arbitrary-dimension CLI `create-table`, and zero non-same-origin requests).
+  Needs `web/vendor` + `web/models` + `web/data/quotes-seed.json` (see
+  `tools/README.md`).
 - `size-budget.mjs` (U5): gzipped size budget for the optimized release wasm.
 
 ## What `ui.spec.mjs` asserts
