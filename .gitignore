@@ -28,3 +28,20 @@ extenddb-*.toml.keep
 
 # Local wire-test instance
 .gw-instance/
+
+# ExtendDB browser/WASM container-build scratch (see scripts/wasm-build.sh)
+.cargo-wasm-container/
+.home-wasm-container/
+crates/wasm/pkg/
+
+# SDK integration test (dev-only) deps
+crates/wasm/tests-node/node_modules/
+crates/wasm/web/pkg/
+
+# Headless-browser UI test (dev-only) deps
+crates/wasm/tests-browser/node_modules/
+
+# In-page SDK console bundle build (dev-only)
+crates/wasm/web-sdk/node_modules/
+crates/wasm/web/pkg-sdk/
+crates/wasm/web/pkg-release/
