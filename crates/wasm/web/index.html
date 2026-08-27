@@ -67,6 +67,8 @@
       border-radius: 6px; padding: 7px 13px; cursor: pointer; font-size: 13.5px;
     }
     button:hover { background: var(--btn-hover); }
+    button:disabled, input:disabled { opacity: .5; cursor: not-allowed; }
+    button:disabled:hover { background: var(--btn-bg); }
     button.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-fg); }
     button.primary:hover { background: var(--primary-hover); }
     .pill {
@@ -88,6 +90,7 @@
     .samples button { font-size: 12.5px; padding: 5px 10px; }
 
     select { background: var(--input-bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; font-size: 13.5px; }
+    #vec-model-pill { text-transform: none; letter-spacing: normal; color: var(--accent); }
 
     /* Vectors tab */
     .vec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
@@ -235,7 +238,27 @@
           <button id="vec-run" data-testid="vec-run" class="primary">Search &#9654;</button>
           <button id="vec-refresh" data-testid="vec-refresh">Refresh tables</button>
         </div>
+
+        <label class="samples-label">Semantic search: type text, embed in this tab, search (<span id="vec-model-pill" data-testid="vec-model-pill"></span>)</label>
+        <div class="vec-grid">
+          <div class="wide"><label for="vec-text">Query text</label>
+            <input id="vec-text" data-testid="vec-text" spellcheck="false" placeholder="telescopes and distant galaxies" /></div>
+        </div>
+        <div class="row">
+          <button id="vec-embed-run" data-testid="vec-embed-run" class="primary">Embed &amp; search</button>
+          <button id="vec-embed-copy" data-testid="vec-embed-copy" title="Embed the query text and log the wire-format vector JSON for aws dynamodb search-vectors / put-item">Embed &rarr; vector JSON</button>
+          <span id="embed-status" class="pill" data-testid="embed-status" hidden></span>
+        </div>
         <div id="vec-results-wrap"><table id="vec-results" data-testid="vec-results"></table></div>
+
+        <label class="samples-label">Add an item with text: embed, then put-item with the vector attribute</label>
+        <div class="vec-grid">
+          <div><label for="vec-add-pk">Partition key</label><input id="vec-add-pk" data-testid="vec-add-pk" spellcheck="false" placeholder="my-quote-01" /></div>
+          <div><label for="vec-add-text">Text</label><input id="vec-add-text" data-testid="vec-add-text" spellcheck="false" placeholder="A short sentence to index" /></div>
+        </div>
+        <div class="row">
+          <button id="vec-add-run" data-testid="vec-add-run">Embed &amp; put item</button>
+        </div>
       </div>
 
       <div class="panel" id="panel-dyn" data-testid="panel-dyn" hidden>
@@ -271,6 +294,8 @@
   <script src="./pkg-sdk/extenddb-sdk.js"></script>
   <script type="module">
     import initWasm, { init as bootEngine, dispatch_http } from "./pkg/extenddb_wasm.js";
+    // Pinned in-browser embedding model (loaded lazily, served same-origin).
+    import { EMBED_MODEL, embedText } from "./embed.mjs";
 
     // ---- theme toggle (default light) -----------------------------------
     const themeBtn = document.getElementById("theme-toggle");
@@ -437,6 +462,53 @@
       call(P + "CreateTable", MUSIC_TABLE);
       for (const Item of MUSIC_ITEMS) call(P + "PutItem", { TableName: "Music", Item });
       return MUSIC_ITEMS.length;
+    }
+
+    // ---- seed data (Quotes: real 384-d sentence embeddings) --------------
+    // 120 short one-liners embedded at build time (tools/embed-seed.mjs) with
+    // the SAME model the browser loads for query text (EMBED_MODEL), so seed
+    // and query vectors always live in one space. The JSON is fetched during
+    // boot (before data-ready), never at query time.
+    const QUOTES_TABLE = {
+      TableName: "Quotes",
+      KeySchema: [{ AttributeName: "pk", KeyType: "HASH" }],
+      AttributeDefinitions: [{ AttributeName: "pk", AttributeType: "S" }],
+      BillingMode: "PAY_PER_REQUEST",
+      VectorIndexes: [
+        {
+          IndexName: "vidx",
+          Dimensions: EMBED_MODEL.dimensions,
+          DistanceFunction: "COSINE",
+          VectorAttribute: { AttributeName: "emb" },
+          Projection: { ProjectionType: "ALL" },
+        },
+      ],
+    };
+    let QUOTES_SEED = null; // cached so "Reset engine" never re-fetches
+    async function loadQuotesSeed() {
+      try {
+        const r = await fetch("./data/quotes-seed.json");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const s = await r.json();
+        if (s.model !== EMBED_MODEL.id || s.dimensions !== EMBED_MODEL.dimensions) {
+          throw new Error(`seed built with ${s.model} (${s.dimensions}d), page pins ${EMBED_MODEL.id} (${EMBED_MODEL.dimensions}d)`);
+        }
+        QUOTES_SEED = s;
+      } catch (e) {
+        QUOTES_SEED = null;
+        logNote("Quotes seed unavailable (" + ((e && e.message) || e) + "): the semantic-search demo table is not seeded. Rebuild it: cd crates/wasm/tools && node embed-seed.mjs");
+      }
+    }
+    function seedQuotes() {
+      if (!QUOTES_SEED) return 0;
+      call(P + "CreateTable", QUOTES_TABLE);
+      for (const it of QUOTES_SEED.items) {
+        call(P + "PutItem", { TableName: "Quotes", Item: {
+          pk: { S: it.pk }, topic: { S: it.topic }, text: { S: it.text },
+          emb: { L: it.emb.map((n) => ({ N: String(n) })) },
+        }});
+      }
+      return QUOTES_SEED.items.length;
     }
 
     // ---- raw-JSON console samples ---------------------------------------
@@ -900,6 +972,7 @@ return out.Items;`;
         vecIndexEl.appendChild(o);
       }
       populateVecItems(tbl);
+      updateTextFlow();
     }
     function currentVecIndex() {
       return vecIndexMeta.find((v) => v.IndexName === vecIndexEl.value) || null;
@@ -971,6 +1044,115 @@ return out.Items;`;
       renderVecResults(status === 200 ? (response.SearchResults || []) : []);
     }
 
+    // ---- text -> vector (in-browser embedding) ---------------------------
+    // The model (EMBED_MODEL) lazy-loads on first use from ./vendor and
+    // ./models (same-origin; the browser caches it after the first load) with
+    // progress in the status pill. The text flow only enables for indexes
+    // whose dimension matches the pinned model, so a query vector can never
+    // come from a different model than the vectors it searches.
+    const vecTextEl = document.getElementById("vec-text");
+    const vecAddPkEl = document.getElementById("vec-add-pk");
+    const vecAddTextEl = document.getElementById("vec-add-text");
+    const embedStatusEl = document.getElementById("embed-status");
+    const embedRunBtn = document.getElementById("vec-embed-run");
+    const embedCopyBtn = document.getElementById("vec-embed-copy");
+    const vecAddRunBtn = document.getElementById("vec-add-run");
+    document.getElementById("vec-model-pill").textContent =
+      `${EMBED_MODEL.id} \u00b7 ${EMBED_MODEL.dimensions}d \u00b7 runs in this tab`;
+
+    function embedProgress(p) {
+      if (!p || !p.status) return;
+      embedStatusEl.hidden = false;
+      if (p.status === "progress" && p.file) {
+        const pct = Number.isFinite(p.progress) ? " " + Math.round(p.progress) + "%" : "";
+        embedStatusEl.textContent = "loading model: " + p.file.split("/").pop() + pct;
+      } else if (p.status === "ready") {
+        embedStatusEl.textContent = "model ready";
+      }
+    }
+    async function embedWithStatus(text) {
+      embedStatusEl.hidden = false;
+      embedStatusEl.textContent = "embedding\u2026";
+      const t0 = performance.now();
+      try {
+        const v = await embedText(text, embedProgress);
+        embedStatusEl.textContent =
+          `embedded in ${(performance.now() - t0).toFixed(0)} ms \u00b7 ${EMBED_MODEL.dimensions}d`;
+        return v;
+      } catch (e) {
+        embedStatusEl.textContent = "model unavailable";
+        makeEntry({ op: "EmbedText", status: "error", request: text,
+          response: "embedding failed: " + ((e && e.message) || e) +
+            "\nvendor the assets first: cd crates/wasm/tools && npm install && node vendor-embed-assets.mjs",
+          error: true });
+        return null;
+      }
+    }
+    // Single writable hash key of type S, or null: the add-with-text flow
+    // only offers itself where a {key, text, vector} item is expressible.
+    function singleStringHashKey(tbl) {
+      if (!tbl || !tbl.KeySchema || tbl.KeySchema.length !== 1 || tbl.KeySchema[0].KeyType !== "HASH") return null;
+      const name = tbl.KeySchema[0].AttributeName;
+      const def = (tbl.AttributeDefinitions || []).find((d) => d.AttributeName === name);
+      return def && def.AttributeType === "S" ? name : null;
+    }
+    function updateTextFlow() {
+      const ix = currentVecIndex();
+      const dimsOk = !!ix && ix.Dimensions === EMBED_MODEL.dimensions;
+      const why = !ix
+        ? "select a table with a vector index first"
+        : `index ${ix.IndexName} is ${ix.Dimensions}d; the bundled model emits ${EMBED_MODEL.dimensions}d vectors, so this index keeps the raw-vector flow`;
+      for (const el of [vecTextEl, embedRunBtn, embedCopyBtn]) {
+        el.disabled = !dimsOk;
+        el.title = dimsOk ? "" : why;
+      }
+      const tbl = vecTableEl.value ? describeTableSafe(vecTableEl.value) : null;
+      const addOk = dimsOk && !!singleStringHashKey(tbl);
+      const addWhy = !dimsOk ? why : "this table's key schema is not a single string hash key";
+      for (const el of [vecAddPkEl, vecAddTextEl, vecAddRunBtn]) {
+        el.disabled = !addOk;
+        el.title = addOk ? "" : addWhy;
+      }
+    }
+    async function vecEmbedSearch() {
+      const text = vecTextEl.value.trim();
+      if (!text) { vecInputError("SearchVectors", "type some query text first"); return; }
+      const v = await embedWithStatus(text);
+      if (!v) return;
+      // Fill the existing query-vector field and run the normal search path.
+      vecQueryEl.value = "[" + v.map((n) => String(n)).join(", ") + "]";
+      vecItemEl.value = "";
+      vecRun();
+    }
+    async function vecEmbedCopy() {
+      const text = vecTextEl.value.trim();
+      if (!text) { vecInputError("EmbedText", "type some query text first"); return; }
+      const v = await embedWithStatus(text);
+      if (!v) return;
+      const wire = JSON.stringify(v.map((n) => ({ N: String(n) })));
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(wire).then(() => {}, () => {});
+      logNote("Wire-format vector for " + text.length + "-char query text (copied to clipboard). Paste it into aws dynamodb search-vectors --search-vector '...' or a put-item vector attribute:\n" + wire);
+    }
+    async function vecAddItem() {
+      const tname = vecTableEl.value;
+      const ix = currentVecIndex();
+      const tbl = tname ? describeTableSafe(tname) : null;
+      const keyName = singleStringHashKey(tbl);
+      if (!tname || !ix || !keyName) { vecInputError("PutItem", "select a vector-indexed table with a single string hash key first"); return; }
+      const pk = vecAddPkEl.value.trim();
+      const text = vecAddTextEl.value.trim();
+      if (!pk || !text) { vecInputError("PutItem", "partition key and text are both required"); return; }
+      const v = await embedWithStatus(text);
+      if (!v) return;
+      const Item = {
+        [keyName]: { S: pk },
+        text: { S: text },
+        [ix.VectorAttribute.AttributeName]: { L: v.map((n) => ({ N: String(n) })) },
+      };
+      const { status } = vecDispatch("PutItem", { TableName: tname, Item });
+      if (status === 200) { refreshBrowser(); populateVecItems(tbl); }
+    }
+
     // ---- Shareable link -------------------------------------------------
     // SECURITY: the URL hash carries a DECLARATIVE CLI command only, consumed
     // EXCLUSIVELY by runCli() -> parseCli() (structural parser, no eval). It must
@@ -1006,7 +1188,8 @@ return out.Items;`;
     document.getElementById("reset").onclick = () => {
       bootEngine();
       const n = seedMusic();
-      logNote(`Engine reset (fresh in-memory database), re-seeded Music with ${n} items.`);
+      const nq = seedQuotes();
+      logNote(`Engine reset (fresh in-memory database), re-seeded Music with ${n} items and Quotes with ${nq} items.`);
       refreshBrowser();
       refreshVecSelectors();
     };
@@ -1015,20 +1198,27 @@ return out.Items;`;
     document.getElementById("vec-create").onclick = vecCreateTable;
     document.getElementById("vec-run").onclick = vecRun;
     document.getElementById("vec-refresh").onclick = () => refreshVecSelectors();
+    embedRunBtn.onclick = vecEmbedSearch;
+    embedCopyBtn.onclick = vecEmbedCopy;
+    vecAddRunBtn.onclick = vecAddItem;
+    vecTextEl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); vecEmbedSearch(); } });
     vecTableEl.onchange = onVecTableChange;
-    vecIndexEl.onchange = () => populateVecItems(vecTableEl.value ? describeTableSafe(vecTableEl.value) : null);
+    vecIndexEl.onchange = () => { populateVecItems(vecTableEl.value ? describeTableSafe(vecTableEl.value) : null); updateTextFlow(); };
     vecItemEl.onchange = () => { if (vecItemEl.value) vecQueryEl.value = vecItemEl.value; };
 
     try {
+      const seedFetch = loadQuotesSeed(); // parallel with the wasm fetch, still pre-ready
       await initWasm();
       bootEngine();
       const n = seedMusic();
+      await seedFetch;
+      const nq = seedQuotes();
       initSdkConsole();
       await initDyneinConsole();
       setMode("cli");
       refreshBrowser();
       loadSample("Query");
-      logNote(`Seeded ${n} tracks into Music so you're never staring at an empty database. Each track carries an 8-d feature embedding behind a COSINE vector index (vidx): try the Vectors tab. It all runs in this tab: no server, and no network after the initial load.`);
+      logNote(`Seeded ${n} tracks into Music (8-d feature embeddings, COSINE index vidx) and ${nq} one-liners into Quotes (real ${EMBED_MODEL.dimensions}-d sentence embeddings from ${EMBED_MODEL.id}) so you're never staring at an empty database. Try the Vectors tab: type a query like \u201ctelescopes and distant galaxies\u201d and search Quotes semantically. It all runs in this tab: no server, and no network after the initial load (the embedding model itself loads lazily, same-origin, on first use).`);
       restoreFromHash();
       document.body.setAttribute("data-ready", "true");
     } catch (e) {

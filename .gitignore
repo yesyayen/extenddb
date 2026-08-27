@@ -45,3 +45,8 @@ crates/wasm/tests-browser/node_modules/
 crates/wasm/web-sdk/node_modules/
 crates/wasm/web/pkg-sdk/
 crates/wasm/web/pkg-release/
+
+# Playground embedding assets (vendored by crates/wasm/tools/vendor-embed-assets.mjs)
+crates/wasm/tools/node_modules/
+crates/wasm/web/vendor/
+crates/wasm/web/models/
