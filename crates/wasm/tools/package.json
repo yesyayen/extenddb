@@ -1,0 +1,11 @@
+{
+  "name": "extenddb-wasm-tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dev-only tools for the ExtendDB browser playground (asset vendoring, seed embedding).",
+  "dependencies": {
+    "@huggingface/transformers": "3.7.6",
+    "playwright": "1.61.1"
+  }
+}

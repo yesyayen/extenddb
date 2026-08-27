@@ -13,13 +13,25 @@ scripts/wasm-build.sh --target web --dev --out-dir web/pkg
 # build the dynein CLI wasm into web/pkg-dynein (powers the "dynein" tab)
 scripts/dynein-wasm-build.sh --target web --dev --out-dir ../wasm/web/pkg-dynein
 
+# vendor the text-embedding runtime + model into web/vendor + web/models
+# (powers the Vectors tab's semantic text search; optional, degrades gracefully)
+cd crates/wasm/tools && npm install && node vendor-embed-assets.mjs && cd -
+
 # serve this directory over http (any static server works)
 cd crates/wasm/web && python3 -m http.server 8099
 # open http://localhost:8099/
 ```
 
 The dynein tab degrades gracefully: if `pkg-dynein` is absent the tab disables
-itself and the rest of the page works.
+itself and the rest of the page works. The same holds for the embedding
+assets: without `web/vendor` + `web/models` the Vectors tab's text flow
+reports the model as unavailable and everything else works.
+
+The seeded `Quotes` table's 384-d sentence embeddings live in
+`web/data/quotes-seed.json` (checked in), precomputed by
+`tools/embed-seed.mjs` with the same model the browser loads for query text
+(`web/embed.mjs` pins it). The model lazy-loads same-origin on first use;
+there is no CDN fetch at runtime.
 
 Load a sample, edit the JSON, and hit Run. `Reset engine` gives a fresh
 in-memory database.
