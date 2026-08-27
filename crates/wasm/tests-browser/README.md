@@ -6,7 +6,7 @@ gap that the Node smoke and SDK-integration tests cannot cover: actual page
 load, wasm boot in a browser, DOM interaction, and browser-level network
 observation.
 
-The page uses **mode tabs** (CLI / JS SDK / Raw JSON): exactly one console is
+The page uses **mode tabs** (CLI / JS SDK / Raw JSON / Vectors / dynein): exactly one console is
 visible at a time, so specs click the relevant `tab-*` before driving a panel.
 The **log** is a scrollable column of boxed, millisecond-timestamped entries on
 the left (each entry has `data-testid="log-entry"`; error entries carry `.err`;
@@ -20,6 +20,10 @@ textarea with grouped, bash-formatted sample commands.
 - `sdk.spec.mjs` (U3): the in-page real `@aws-sdk/client-dynamodb` console.
 - `browser.spec.mjs` (U4): the data browser (table selector + live item grid).
 - `share.spec.mjs` (U5): the shareable link (encode command in URL, restore + auto-run).
+- `vector.spec.mjs`: the Vectors tab (create a vector-indexed table from the
+  form, insert via CLI, SearchVectors with a picked item or a typed vector,
+  ranked results with scores, data-browser pill + truncated vector previews,
+  raw JSON + CLI `search-vectors` parity, zero network).
 - `size-budget.mjs` (U5): gzipped size budget for the optimized release wasm.
 
 ## What `ui.spec.mjs` asserts
