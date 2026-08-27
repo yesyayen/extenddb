@@ -46,12 +46,20 @@ See `../tests-node/sdk-integration.mjs` for the Node integration test.
 
 ## Interfaces (one shared engine)
 
-The page offers four ways to drive the same in-tab database, so a write from any
+The page offers five ways to drive the same in-tab database, so a write from any
 one is visible to all and to the data browser:
 
 - **CLI**: an `aws dynamodb <op> --flags` shell (parsed in JS to the wire call).
 - **JS SDK**: the real `@aws-sdk/client-dynamodb` over the requestHandler shim.
 - **Raw JSON**: hand-write `X-Amz-Target` + body.
+- **Vectors**: a first-class vector-search panel. Create a table with a vector
+  index (index name, dimensions, distance metric), then run `SearchVectors`
+  against any vector-indexed table: pick an existing item as the query (its
+  embedding fills the query box) or type a JSON array, set `TopK`, and get a
+  ranked results table with scores. The seeded `Music` table carries a COSINE
+  index (`vidx`) over hand-crafted 8-d feature embeddings, so similarity search
+  works out of the box. The data browser marks vector-indexed tables with a
+  pill and truncates vector attributes to a short preview.
 - **dynein**: the real [awslabs/dynein](https://github.com/awslabs/dynein) CLI,
   vendored and compiled to a second wasm module (`pkg-dynein`). dynein's own
   DynamoDB transport is routed to this page's engine via
@@ -63,8 +71,10 @@ one is visible to all and to the data browser:
 
 POC: core data plane (CreateTable / DescribeTable / ListTables / DeleteTable,
 PutItem / GetItem / UpdateItem / DeleteItem with ConditionExpression, Query,
-Scan). Transactions, batch, streams, backup, TTL/tags, and secondary indexes are
-out of scope for the POC.
+Scan) plus vector indexes declared at CreateTable and SearchVectors (exact
+nearest-neighbor scan, COSINE / EUCLIDEAN / DOT_PRODUCT). Transactions, batch,
+streams, backup, TTL/tags, and non-vector secondary indexes are out of scope
+for the POC.
 
 Notes:
 - `python3 -m http.server` may serve `.wasm` as `application/octet-stream`; the
