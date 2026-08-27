@@ -1,0 +1,14 @@
+{
+  "name": "extenddb-wasm-ui-test",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless-browser (Playwright chromium) tests for the ExtendDB browser playground.",
+  "scripts": {
+    "test": "node ui.spec.mjs && node cli.spec.mjs && node sdk.spec.mjs && node dyn.spec.mjs && node browser.spec.mjs && node share.spec.mjs",
+    "size": "node size-budget.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.0"
+  }
+}

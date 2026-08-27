@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ExtendDB: real DynamoDB, running entirely in your browser</title>
+  <!-- Apply saved theme before paint (default light) to avoid a flash. -->
+  <script>
+    try { document.documentElement.setAttribute("data-theme", localStorage.getItem("extenddb-theme") || "light"); }
+    catch (e) { document.documentElement.setAttribute("data-theme", "light"); }
+  </script>
+  <style>
+    :root {
+      --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --border: #d1d9e0;
+      --panel: #f6f8fa; --card: #ffffff; --code-bg: #f6f8fa; --input-bg: #ffffff;
+      --accent: #0969da;
+      --primary: #1f883d; --primary-hover: #1a7f37; --primary-fg: #ffffff;
+      --ok: #1a7f37; --ok-border: #2da44e;
+      --err: #cf222e; --err-border: #cf222e; --err-bg: #fff5f5;
+      --btn-bg: #f6f8fa; --btn-hover: #eaeef2;
+      --req-bg: #eef4ff; --req-border: #d0e2ff; --resp-bg: #eefbf1; --resp-border: #c9ecd3;
+      color-scheme: light;
+    }
+    html[data-theme="dark"] {
+      --bg: #0d1117; --fg: #c9d1d9; --muted: #8b949e; --border: #30363d;
+      --panel: #161b22; --card: #161b22; --code-bg: #0d1117; --input-bg: #161b22;
+      --accent: #58a6ff;
+      --primary: #238636; --primary-hover: #2ea043; --primary-fg: #ffffff;
+      --ok: #3fb950; --ok-border: #238636;
+      --err: #f85149; --err-border: #da3633; --err-bg: #1b1416;
+      --btn-bg: #21262d; --btn-hover: #30363d;
+      --req-bg: #0d1a2b; --req-border: #1f3350; --resp-bg: #0e1d15; --resp-border: #1e3a29;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font: 15px/1.55 ui-sans-serif, system-ui, sans-serif;
+      background: var(--bg); color: var(--fg);
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      padding: 9px 24px; border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0; font-size: 16px; }
+    header p { margin: 1px 0 0; color: var(--muted); font-size: 12px; }
+    header code { color: var(--accent); }
+    #theme-toggle { white-space: nowrap; padding: 5px 10px; font-size: 12.5px; }
+
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 18px 24px; align-items: start; }
+    .cols .right { order: 1; }  /* console: left */
+    .cols .left { order: 2; }   /* log: right */
+    @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+    label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px; text-transform: uppercase; letter-spacing: .04em; }
+    input, textarea {
+      width: 100%; background: var(--input-bg); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 6px; padding: 9px 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px;
+    }
+    textarea { resize: vertical; white-space: pre; }
+    #cli { height: 120px; }
+    #dyn { height: 120px; }
+    #sdk { height: 210px; }
+    #body { height: 200px; }
+    .row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    button {
+      background: var(--btn-bg); color: var(--fg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 7px 13px; cursor: pointer; font-size: 13.5px;
+    }
+    button:hover { background: var(--btn-hover); }
+    button.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-fg); }
+    button.primary:hover { background: var(--primary-hover); }
+    .pill {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
+      background: var(--panel); color: var(--muted); white-space: nowrap; font-size: 13px;
+    }
+
+    /* mode tabs */
+    .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); }
+    .tab {
+      border: 1px solid var(--border); border-bottom: none; background: transparent; color: var(--muted);
+      border-radius: 6px 6px 0 0; padding: 8px 15px; font-size: 14px; cursor: pointer;
+    }
+    .tab:hover { background: var(--panel); }
+    .tab.active { background: var(--panel); color: var(--fg); font-weight: 600; }
+    .panel { border: 1px solid var(--border); border-top: none; border-radius: 0 0 8px 8px; padding: 6px 14px 16px; background: var(--card); }
+    .samples-label { margin-top: 12px; }
+    .samples button { font-size: 12.5px; padding: 5px 10px; }
+
+    select { background: var(--input-bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; font-size: 13.5px; }
+    .browser-section { padding: 16px 24px 30px; border-top: 1px solid var(--border); }
+    #grid-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 6px; margin-top: 8px; max-height: 320px; }
+    table#grid { border-collapse: collapse; width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+    #grid th, #grid td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; white-space: nowrap; }
+    #grid th { position: sticky; top: 0; background: var(--panel); color: var(--muted); }
+    #grid tbody tr:nth-child(even) { background: var(--panel); }
+
+    /* log: left, ONE scroll (outer). Entries never scroll internally. */
+    .log-topbar { display: flex; align-items: center; justify-content: space-between; }
+    .log-topbar label { margin: 0; }
+    #log {
+      margin-top: 6px; height: 64vh; min-height: 360px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 8px; padding-right: 4px;
+    }
+    .log-entry { border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 9px 11px; }
+    .log-entry.err { border-color: var(--err-border); background: var(--err-bg); }
+    .log-entry.note { border-style: dashed; background: var(--panel); }
+    .log-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; flex-wrap: wrap; }
+    .log-time { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+    .log-op { color: var(--fg); font-weight: 600; }
+    .log-status { margin-left: auto; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; border: 1px solid var(--ok-border); color: var(--ok); }
+    .log-entry.err .log-status { border-color: var(--err-border); color: var(--err); }
+    .log-dur { color: var(--muted); font-size: 11.5px; }
+    .log-body { margin: 7px 0 0; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px 8px; background: var(--code-bg); }
+    .log-body.req { background: var(--req-bg); border-color: var(--req-border); }
+    .log-body.resp { background: var(--resp-bg); border-color: var(--resp-border); }
+    .log-body.clamp { max-height: 200px; overflow: hidden; }
+    .log-body-tag { display: inline-block; margin-bottom: 4px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    .log-body-text { margin: 0; padding: 0; background: transparent; border: 0; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: var(--fg); }
+    .log-expand { margin-top: 5px; padding: 2px 8px; font-size: 12px; color: var(--accent); background: transparent; border: 1px solid var(--border); }
+    /* empty state: a friendly bordered box instead of a void */
+    #log .empty {
+      flex: 1; display: flex; align-items: center; justify-content: center; text-align: center;
+      border: 1px dashed var(--border); border-radius: 10px; color: var(--muted);
+      padding: 24px; font-size: 14px; line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>ExtendDB &mdash; real DynamoDB, running entirely in your browser</h1>
+      <p>The real ExtendDB engine compiled to WebAssembly over a SQLite backend. Every request runs in this tab: <code>no server, no network after the initial load</code>.</p>
+    </div>
+    <button id="theme-toggle" data-testid="theme-toggle">&#127769; Dark</button>
+  </header>
+
+  <div class="cols">
+    <!-- LEFT: log (single scroll) -->
+    <div class="left">
+      <div class="log-topbar">
+        <label>Log</label>
+        <button id="clear">Clear</button>
+      </div>
+      <div id="log" data-testid="log"><div class="empty">No calls yet &#128075;<br />Pick <b>CLI</b>, <b>JS SDK</b>, or <b>dynein</b>, load a sample, and run it. Each call lands here as a timestamped entry.</div></div>
+    </div>
+
+    <!-- RIGHT: mode tabs + the one active console -->
+    <div class="right">
+      <div class="tabs" id="tabs">
+        <button class="tab active" data-mode="cli" data-testid="tab-cli">CLI</button>
+        <button class="tab" data-mode="sdk" data-testid="tab-sdk">JS SDK</button>
+        <button class="tab" data-mode="raw" data-testid="tab-raw">Raw JSON</button>
+        <button class="tab" data-mode="dyn" data-testid="tab-dyn">dynein</button>
+      </div>
+
+      <div class="panel" id="panel-cli" data-testid="panel-cli">
+        <label class="samples-label">Control plane</label>
+        <div class="row samples" id="cli-samples-cp"></div>
+        <label class="samples-label">Data plane &middot; item (put / get / delete / update)</label>
+        <div class="row samples" id="cli-samples-item"></div>
+        <label class="samples-label">Data plane &middot; read (query / scan)</label>
+        <div class="row samples" id="cli-samples-read"></div>
+        <label for="cli">Command (edit freely, then Run &mdash; Ctrl/&#8984;+Enter)</label>
+        <textarea id="cli" data-testid="cli" spellcheck="false"
+          placeholder="aws dynamodb query \&#10;  --table-name Music \&#10;  --key-condition-expression &quot;Artist = :a&quot; \&#10;  --expression-attribute-values '{&quot;:a&quot;:{&quot;S&quot;:&quot;Radiohead&quot;}}'"></textarea>
+        <div class="row">
+          <button id="cli-run" data-testid="cli-run" class="primary">Run</button>
+          <button id="cli-share" data-testid="cli-share">Share link</button>
+        </div>
+      </div>
+
+      <div class="panel" id="panel-sdk" data-testid="panel-sdk" hidden>
+        <label for="sdk">SDK console &mdash; real <code>@aws-sdk/client-dynamodb</code>, runs in-tab</label>
+        <textarea id="sdk" data-testid="sdk" spellcheck="false"></textarea>
+        <div class="row">
+          <button id="sdk-run" data-testid="sdk-run" class="primary">Run SDK &#9654;</button>
+        </div>
+      </div>
+
+      <div class="panel" id="panel-raw" data-testid="panel-raw" hidden>
+        <label for="target">Operation (X-Amz-Target)</label>
+        <input id="target" spellcheck="false" value="DynamoDB_20120810.Query" />
+        <label for="body">Request JSON</label>
+        <textarea id="body" spellcheck="false"></textarea>
+        <div class="row">
+          <button id="run" class="primary" data-testid="run">Run &#9654;</button>
+        </div>
+        <label class="samples-label">Samples (click to load, then Run)</label>
+        <div class="row samples" id="sample-buttons"></div>
+      </div>
+
+      <div class="panel" id="panel-dyn" data-testid="panel-dyn" hidden>
+        <label class="samples-label">The real <code>awslabs/dynein</code> CLI, compiled to wasm, driving this same in-tab engine</label>
+        <div class="row samples" id="dyn-samples"></div>
+        <label for="dyn">Commands (one <code>dy ...</code> per line, then Run &mdash; Ctrl/&#8984;+Enter)</label>
+        <textarea id="dyn" data-testid="dyn" spellcheck="false"
+          placeholder="dy list&#10;dy -t Music query Radiohead&#10;dy -t Music scan --limit 5"></textarea>
+        <div class="row">
+          <button id="dyn-run" data-testid="dyn-run" class="primary">Run</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="browser-section">
+    <div class="row" style="align-items:center; margin-top:0">
+      <label style="margin:0">Data browser</label>
+      <select id="tbl-select" data-testid="tbl-select"></select>
+      <button id="tbl-refresh" data-testid="tbl-refresh">Refresh</button>
+      <button id="reset" data-testid="reset">Reset engine</button>
+      <span id="tbl-count" class="pill" data-testid="tbl-count" style="margin-left:auto"></span>
+    </div>
+    <div id="grid-wrap">
+      <table id="grid" data-testid="grid"></table>
+    </div>
+  </div>
+
+  <!-- Real AWS SDK v3 + the requestHandler shim, bundled to a browser global
+       (window.ExtendDBSDK). Built by crates/wasm/web-sdk (npm run build). If it
+       is absent the SDK console degrades gracefully; the rest of the page works. -->
+  <script src="./pkg-sdk/extenddb-sdk.js"></script>
+  <script type="module">
+    import initWasm, { init as bootEngine, dispatch_http } from "./pkg/extenddb_wasm.js";
+
+    // ---- theme toggle (default light) -----------------------------------
+    const themeBtn = document.getElementById("theme-toggle");
+    function renderThemeBtn() {
+      const dark = document.documentElement.getAttribute("data-theme") === "dark";
+      themeBtn.textContent = dark ? "\u2600 Light" : "\u{1F319} Dark";
+    }
+    themeBtn.onclick = () => {
+      const dark = document.documentElement.getAttribute("data-theme") === "dark";
+      const next = dark ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      try { localStorage.setItem("extenddb-theme", next); } catch (e) {}
+      renderThemeBtn();
+    };
+    renderThemeBtn();
+
+    const targetEl = document.getElementById("target");
+    const bodyEl = document.getElementById("body");
+    const logEl = document.getElementById("log");
+    const P = "DynamoDB_20120810.";
+
+    // ---- boxed, timestamped log (single outer scroll) -------------------
+    function tsNow() {
+      const d = new Date();
+      const p = (n, l = 2) => String(n).padStart(l, "0");
+      return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+    }
+    function clearEmpty() { const e = logEl.querySelector(".empty"); if (e) e.remove(); }
+    // Long bodies are clamped to ~5 lines with an inline expand toggle, so there
+    // is never a nested scroll - only the #log column scrolls. All text is set
+    // via textContent (XSS-safe).
+    function bodyBox(kind, text) {
+      const box = document.createElement("div");
+      box.className = "log-body" + (kind ? " " + kind : "");
+      if (kind) {
+        const tag = document.createElement("span");
+        tag.className = "log-body-tag";
+        tag.textContent = kind === "req" ? "req" : "resp";
+        box.append(tag);
+      }
+      const pre = document.createElement("pre");
+      pre.className = "log-body-text";
+      pre.textContent = text;
+      box.append(pre);
+      return box;
+    }
+    function appendBody(entry, kind, text) {
+      if (text == null) return;
+      const box = bodyBox(kind, text);
+      entry.append(box);
+      if (text.split("\n").length > 8) {
+        box.classList.add("clamp");
+        const btn = document.createElement("button");
+        btn.className = "log-expand"; btn.textContent = "show more";
+        btn.onclick = () => {
+          const clamped = box.classList.toggle("clamp");
+          btn.textContent = clamped ? "show more" : "show less";
+        };
+        entry.append(btn);
+      }
+    }
+    function makeEntry({ op, status, ms, request, response, error }) {
+      clearEmpty();
+      const isErr = !!error || (typeof status === "number" && status >= 400);
+      const entry = document.createElement("div");
+      entry.className = "log-entry" + (isErr ? " err" : "");
+      entry.setAttribute("data-testid", "log-entry");
+      const head = document.createElement("div"); head.className = "log-head";
+      const time = document.createElement("span"); time.className = "log-time"; time.textContent = tsNow();
+      const opEl = document.createElement("span"); opEl.className = "log-op"; opEl.textContent = op;
+      head.append(time, opEl);
+      if (status !== undefined && status !== null && status !== "") {
+        const st = document.createElement("span"); st.className = "log-status"; st.textContent = String(status);
+        head.append(st);
+      }
+      if (ms != null) { const dur = document.createElement("span"); dur.className = "log-dur"; dur.textContent = ms + " ms"; head.append(dur); }
+      entry.append(head);
+      appendBody(entry, "req", request);
+      appendBody(entry, "resp", response);
+      logEl.prepend(entry);
+    }
+    function logNote(text) {
+      clearEmpty();
+      const entry = document.createElement("div");
+      entry.className = "log-entry note";
+      entry.setAttribute("data-testid", "log-entry");
+      const head = document.createElement("div"); head.className = "log-head";
+      const time = document.createElement("span"); time.className = "log-time"; time.textContent = tsNow();
+      const opEl = document.createElement("span"); opEl.className = "log-op"; opEl.textContent = "note";
+      head.append(time, opEl); entry.append(head);
+      entry.append(bodyBox(null, text));
+      logEl.prepend(entry);
+    }
+
+    function call(target, bodyObj) {
+      const raw = dispatch_http(target, JSON.stringify(bodyObj));
+      const parsed = JSON.parse(raw);
+      let response; try { response = JSON.parse(parsed.body); } catch { response = parsed.body; }
+      return { statusCode: parsed.statusCode, response };
+    }
+
+    // ---- seed data (30 tracks) ------------------------------------------
+    const MUSIC_TABLE = {
+      TableName: "Music",
+      KeySchema: [
+        { AttributeName: "Artist", KeyType: "HASH" },
+        { AttributeName: "SongTitle", KeyType: "RANGE" },
+      ],
+      AttributeDefinitions: [
+        { AttributeName: "Artist", AttributeType: "S" },
+        { AttributeName: "SongTitle", AttributeType: "S" },
+      ],
+      BillingMode: "PAY_PER_REQUEST",
+    };
+    const MUSIC_RAW = [
+      ["Radiohead", "Paranoid Android", "OK Computer", 1997],
+      ["Radiohead", "Karma Police", "OK Computer", 1997],
+      ["Radiohead", "Creep", "Pablo Honey", 1993],
+      ["Radiohead", "No Surprises", "OK Computer", 1997],
+      ["Daft Punk", "One More Time", "Discovery", 2001],
+      ["Daft Punk", "Get Lucky", "Random Access Memories", 2013],
+      ["Daft Punk", "Harder Better Faster Stronger", "Discovery", 2001],
+      ["Nirvana", "Smells Like Teen Spirit", "Nevermind", 1991],
+      ["Nirvana", "Come As You Are", "Nevermind", 1991],
+      ["The Beatles", "Come Together", "Abbey Road", 1969],
+      ["The Beatles", "Here Comes the Sun", "Abbey Road", 1969],
+      ["Pink Floyd", "Money", "The Dark Side of the Moon", 1973],
+      ["Pink Floyd", "Time", "The Dark Side of the Moon", 1973],
+      ["Queen", "Bohemian Rhapsody", "A Night at the Opera", 1975],
+      ["Queen", "Don't Stop Me Now", "Jazz", 1978],
+      ["Led Zeppelin", "Stairway to Heaven", "Led Zeppelin IV", 1971],
+      ["Fleetwood Mac", "Dreams", "Rumours", 1977],
+      ["Fleetwood Mac", "Go Your Own Way", "Rumours", 1977],
+      ["Michael Jackson", "Billie Jean", "Thriller", 1982],
+      ["Michael Jackson", "Beat It", "Thriller", 1982],
+      ["Prince", "Purple Rain", "Purple Rain", 1984],
+      ["David Bowie", "Heroes", "Heroes", 1977],
+      ["The Rolling Stones", "Paint It Black", "Aftermath", 1966],
+      ["Amy Winehouse", "Rehab", "Back to Black", 2006],
+      ["Arctic Monkeys", "Do I Wanna Know?", "AM", 2013],
+      ["Tame Impala", "The Less I Know the Better", "Currents", 2015],
+      ["Gorillaz", "Feel Good Inc.", "Demon Days", 2005],
+      ["The Strokes", "Last Nite", "Is This It", 2001],
+      ["Kendrick Lamar", "HUMBLE.", "DAMN.", 2017],
+      ["Beyonce", "Halo", "I Am... Sasha Fierce", 2008],
+    ];
+    const MUSIC_ITEMS = MUSIC_RAW.map(([Artist, SongTitle, Album, Year]) => ({
+      Artist: { S: Artist }, SongTitle: { S: SongTitle }, Album: { S: Album }, Year: { N: String(Year) },
+    }));
+    function seedMusic() {
+      call(P + "CreateTable", MUSIC_TABLE);
+      for (const Item of MUSIC_ITEMS) call(P + "PutItem", { TableName: "Music", Item });
+      return MUSIC_ITEMS.length;
+    }
+
+    // ---- raw-JSON console samples ---------------------------------------
+    const SAMPLES = {
+      Query: { target: P + "Query", body: {
+        TableName: "Music", KeyConditionExpression: "Artist = :a",
+        ExpressionAttributeValues: { ":a": { S: "Radiohead" } },
+      }},
+      GetItem: { target: P + "GetItem", body: {
+        TableName: "Music", Key: { Artist: { S: "Radiohead" }, SongTitle: { S: "Paranoid Android" } },
+      }},
+      PutItem: { target: P + "PutItem", body: {
+        TableName: "Music", Item: { Artist: { S: "Muse" }, SongTitle: { S: "Hysteria" }, Album: { S: "Absolution" }, Year: { N: "2003" } },
+      }},
+      UpdateItem: { target: P + "UpdateItem", body: {
+        TableName: "Music", Key: { Artist: { S: "Radiohead" }, SongTitle: { S: "Paranoid Android" } },
+        UpdateExpression: "SET PlayCount = :c", ExpressionAttributeValues: { ":c": { N: "42" } }, ReturnValues: "ALL_NEW",
+      }},
+      Scan: { target: P + "Scan", body: { TableName: "Music", Limit: 5 } },
+      DescribeTable: { target: P + "DescribeTable", body: { TableName: "Music" } },
+      ListTables: { target: P + "ListTables", body: {} },
+      CreateTable: { target: P + "CreateTable", body: MUSIC_TABLE },
+      DeleteItem: { target: P + "DeleteItem", body: {
+        TableName: "Music", Key: { Artist: { S: "Radiohead" }, SongTitle: { S: "Paranoid Android" } }, ReturnValues: "ALL_OLD",
+      }},
+      DeleteTable: { target: P + "DeleteTable", body: { TableName: "Music" } },
+    };
+    function loadSample(name) {
+      const s = SAMPLES[name];
+      targetEl.value = s.target; bodyEl.value = JSON.stringify(s.body, null, 2);
+    }
+
+    // ---- AWS CLI-style shell --------------------------------------------
+    const cliEl = document.getElementById("cli");
+    const JSON_FLAGS = new Set([
+      "Item", "Key", "ExpressionAttributeValues", "ExpressionAttributeNames",
+      "AttributeDefinitions", "KeySchema", "ProvisionedThroughput",
+      "ExclusiveStartKey", "GlobalSecondaryIndexes", "LocalSecondaryIndexes",
+    ]);
+    const NUMBER_FLAGS = new Set(["Limit"]);
+    function tokenize(line) {
+      // Support bash-style line continuations (backslash-newline) so multi-line
+      // sample commands parse; newlines are otherwise whitespace anyway.
+      line = String(line).replace(/\\\r?\n/g, " ");
+      const toks = []; let cur = null; let q = null;
+      const push = () => { if (cur !== null) { toks.push(cur); cur = null; } };
+      for (const c of line) {
+        if (q) { if (c === q) q = null; else cur = (cur ?? "") + c; }
+        else if (c === '"' || c === "'") { q = c; cur = cur ?? ""; }
+        else if (/\s/.test(c)) { push(); }
+        else cur = (cur ?? "") + c;
+      }
+      if (q !== null) throw new Error("unterminated quote in command");
+      push();
+      return toks;
+    }
+    function kebabToPascal(s) {
+      return s.split("-").map((w) => (w ? w[0].toUpperCase() + w.slice(1) : "")).join("");
+    }
+    function parseCli(line) {
+      const t = tokenize(line);
+      if (t[0] !== "aws" || t[1] !== "dynamodb") throw new Error("commands must start with: aws dynamodb <operation>");
+      const op = t[2];
+      if (!op) throw new Error("missing operation, e.g. aws dynamodb list-tables");
+      const target = P + kebabToPascal(op);
+      const body = {};
+      let i = 3;
+      while (i < t.length) {
+        const tok = t[i];
+        if (!tok.startsWith("--")) throw new Error("expected a --flag, got: " + tok);
+        let flag = tok.slice(2);
+        let inlineVal = null;
+        const eq = flag.indexOf("=");
+        if (eq >= 0) { inlineVal = flag.slice(eq + 1); flag = flag.slice(0, eq); }
+        if (flag.startsWith("no-") && inlineVal === null) { body[kebabToPascal(flag.slice(3))] = false; i++; continue; }
+        const key = kebabToPascal(flag);
+        let val;
+        if (inlineVal !== null) { val = inlineVal; i += 1; }
+        else {
+          const next = t[i + 1];
+          if (next === undefined || next.startsWith("--")) { body[key] = true; i++; continue; }
+          val = next; i += 2;
+        }
+        if (JSON_FLAGS.has(key)) {
+          try { val = JSON.parse(val); } catch (e) { throw new Error("--" + flag + " expects JSON: " + e.message); }
+        } else if (NUMBER_FLAGS.has(key)) {
+          val = Number(val); if (!Number.isFinite(val)) throw new Error("--" + flag + " expects a number");
+        } else if (val === "true") { val = true; } else if (val === "false") { val = false; }
+        body[key] = val;
+      }
+      return { target, body };
+    }
+    function runCli() {
+      const line = cliEl.value.trim();
+      if (!line) return;
+      let parsed;
+      try { parsed = parseCli(line); }
+      catch (e) { makeEntry({ op: "cli", status: 400, request: "$ " + line, response: "parse error: " + e.message, error: true }); return; }
+      targetEl.value = parsed.target;
+      bodyEl.value = JSON.stringify(parsed.body, null, 2);
+      const t0 = performance.now();
+      let out, status;
+      try {
+        const raw = dispatch_http(parsed.target, JSON.stringify(parsed.body));
+        const p = JSON.parse(raw); status = p.statusCode;
+        let r; try { r = JSON.parse(p.body); } catch { r = p.body; }
+        out = { statusCode: p.statusCode, response: r };
+      } catch (e) { status = 500; out = { error: String(e) }; }
+      const ms = (performance.now() - t0).toFixed(2);
+      makeEntry({ op: parsed.target.split(".").pop(), status, ms, request: "$ " + line, response: JSON.stringify(out, null, 2) });
+      refreshBrowser();
+    }
+
+    // CLI quick-picks, bash-formatted (multi-line) and grouped. Click to load.
+    const CLI_CP = [
+      ["create-table", "aws dynamodb create-table \\\n  --table-name Demo \\\n  --attribute-definitions '[{\"AttributeName\":\"pk\",\"AttributeType\":\"S\"}]' \\\n  --key-schema '[{\"AttributeName\":\"pk\",\"KeyType\":\"HASH\"}]' \\\n  --billing-mode PAY_PER_REQUEST"],
+      ["describe-table", "aws dynamodb describe-table \\\n  --table-name Music"],
+      ["list-tables", "aws dynamodb list-tables"],
+      ["delete-table", "aws dynamodb delete-table \\\n  --table-name Demo"],
+    ];
+    const CLI_ITEM = [
+      ["put-item", "aws dynamodb put-item \\\n  --table-name Music \\\n  --item '{\"Artist\":{\"S\":\"Muse\"},\"SongTitle\":{\"S\":\"Hysteria\"},\"Year\":{\"N\":\"2003\"}}'"],
+      ["get-item", "aws dynamodb get-item \\\n  --table-name Music \\\n  --key '{\"Artist\":{\"S\":\"Radiohead\"},\"SongTitle\":{\"S\":\"Paranoid Android\"}}'"],
+      ["delete-item", "aws dynamodb delete-item \\\n  --table-name Music \\\n  --key '{\"Artist\":{\"S\":\"Muse\"},\"SongTitle\":{\"S\":\"Hysteria\"}}'"],
+      ["update-item", "aws dynamodb update-item \\\n  --table-name Music \\\n  --key '{\"Artist\":{\"S\":\"Radiohead\"},\"SongTitle\":{\"S\":\"Paranoid Android\"}}' \\\n  --update-expression \"SET PlayCount = :c\" \\\n  --expression-attribute-values '{\":c\":{\"N\":\"42\"}}'"],
+    ];
+    const CLI_READ = [
+      ["query", "aws dynamodb query \\\n  --table-name Music \\\n  --key-condition-expression \"Artist = :a\" \\\n  --expression-attribute-values '{\":a\":{\"S\":\"Radiohead\"}}'"],
+      ["scan", "aws dynamodb scan \\\n  --table-name Music \\\n  --limit 5"],
+    ];
+    function renderCliSamples(el, pairs) {
+      for (const [label, cmd] of pairs) {
+        const b = document.createElement("button");
+        b.textContent = label; b.title = cmd;
+        b.onclick = () => { cliEl.value = cmd; cliEl.focus(); };
+        el.appendChild(b);
+      }
+    }
+    renderCliSamples(document.getElementById("cli-samples-cp"), CLI_CP);
+    renderCliSamples(document.getElementById("cli-samples-item"), CLI_ITEM);
+    renderCliSamples(document.getElementById("cli-samples-read"), CLI_READ);
+
+    const buttons = document.getElementById("sample-buttons");
+    for (const name of Object.keys(SAMPLES)) {
+      const b = document.createElement("button");
+      b.textContent = name; b.onclick = () => loadSample(name);
+      buttons.appendChild(b);
+    }
+
+    function run() {
+      const target = targetEl.value.trim();
+      const body = bodyEl.value;
+      const t0 = performance.now();
+      let out, status;
+      try {
+        const raw = dispatch_http(target, body);
+        const parsed = JSON.parse(raw); status = parsed.statusCode;
+        let response; try { response = JSON.parse(parsed.body); } catch { response = parsed.body; }
+        out = { statusCode: parsed.statusCode, response };
+      } catch (e) { status = 500; out = { error: String(e) }; }
+      const ms = (performance.now() - t0).toFixed(2);
+      makeEntry({ op: target.split(".").pop(), status, ms, request: body, response: JSON.stringify(out, null, 2) });
+      refreshBrowser();
+    }
+
+    // ---- mode tabs ------------------------------------------------------
+    function setMode(mode) {
+      const modes = ["cli", "sdk", "raw", "dyn"];
+      if (!modes.includes(mode)) mode = "cli";
+      for (const m of modes) {
+        document.getElementById("panel-" + m).hidden = (m !== mode);
+        document.querySelector('[data-mode="' + m + '"]').classList.toggle("active", m === mode);
+      }
+    }
+    for (const tab of document.querySelectorAll("#tabs .tab")) {
+      tab.onclick = () => setMode(tab.getAttribute("data-mode"));
+    }
+
+    // ---- SDK console ----------------------------------------------------
+    const SDK_EXAMPLE =
+`const out = await client.send(new QueryCommand({
+  TableName: "Music",
+  KeyConditionExpression: "Artist = :a",
+  ExpressionAttributeValues: { ":a": { S: "Radiohead" } },
+}));
+return out.Items;`;
+    let sdkClient = null;
+    function initSdkConsole() {
+      const S = window.ExtendDBSDK;
+      const sdkEl = document.getElementById("sdk");
+      const sdkBtn = document.getElementById("sdk-run");
+      if (!S || !S.DynamoDBClient) {
+        sdkEl.value = "// SDK bundle not built. Build it, then reload:\n//   cd crates/wasm/web-sdk && npm install && npm run build";
+        sdkBtn.disabled = true; return;
+      }
+      sdkClient = new S.DynamoDBClient({
+        region: "us-east-1",
+        credentials: { accessKeyId: "local", secretAccessKey: "local" },
+        requestHandler: S.createExtenddbRequestHandler({ dispatch_http }),
+        maxAttempts: 1,
+      });
+      sdkEl.value = SDK_EXAMPLE;
+      sdkBtn.onclick = runSdk;
+    }
+    async function runSdk() {
+      const code = document.getElementById("sdk").value;
+      const S = window.ExtendDBSDK;
+      const scope = { client: sdkClient, ...S };
+      const t0 = performance.now();
+      try {
+        // SECURITY: `code` MUST come only from the user's own #sdk textarea (their
+        // own tab/origin, like DevTools). Never feed URL/hash-sourced input here;
+        // that would make a shared link an arbitrary-code-execution sink. The
+        // shareable link (#cmd) is routed to parseCli, never here.
+        const fn = new Function(...Object.keys(scope), '"use strict"; return (async () => {\n' + code + "\n})();");
+        const result = await fn(...Object.values(scope));
+        const ms = (performance.now() - t0).toFixed(2);
+        makeEntry({ op: "SDK", status: 200, ms, request: code, response: JSON.stringify(result, null, 2) });
+      } catch (e) {
+        const ms = (performance.now() - t0).toFixed(2);
+        makeEntry({ op: "SDK", status: (e && e.name) ? e.name : "error", ms, request: code, response: (e && e.message) || String(e), error: true });
+      } finally { refreshBrowser(); }
+    }
+
+    // ---- dynein console (real awslabs/dynein compiled to wasm) ----------
+    // dynein is a SEPARATE wasm module (its own AWS SDK + engine linked in). We
+    // route its DynamoDB transport to the SAME engine as everything else via
+    // set_host_dispatch(dispatch_http), so the CLI / JS SDK / Raw / dynein tabs
+    // and the data browser all share one in-tab database. Loaded dynamically so
+    // a missing pkg-dynein degrades gracefully (the tab disables, page still works).
+    const dynEl = document.getElementById("dyn");
+    let dyExec = null;
+    const DYN_SAMPLES = [
+      ["list", "dy list"],
+      ["desc", "dy desc -t Music"],
+      ["scan", "dy -t Music scan --limit 5"],
+      ["query", "dy -t Music query Radiohead"],
+      ["get", "dy -t Music get Radiohead 'Paranoid Android'"],
+      ["put", "dy -t Music put Muse Hysteria --item '{\"Album\":\"Absolution\",\"Year\":2003}'"],
+      ["update", "dy -t Music upd Radiohead 'Karma Police' --set 'PlayCount=7'"],
+      ["create-table", "dy admin create table Demo --keys pk,S sk,N"],
+    ];
+    for (const [label, cmd] of DYN_SAMPLES) {
+      const b = document.createElement("button");
+      b.textContent = label; b.title = cmd;
+      // append as a new line so several commands can be queued, then Run.
+      b.onclick = () => { dynEl.value = (dynEl.value.trim() ? dynEl.value.replace(/\s+$/, "") + "\n" : "") + cmd; dynEl.focus(); };
+      document.getElementById("dyn-samples").appendChild(b);
+    }
+    function dyVerb(line) {
+      const t = line.trim().replace(/^dy\s+/, "").split(/\s+/);
+      const skip = new Set(["-t", "--table", "--region", "-r", "--port", "-p"]);
+      let i = 0;
+      while (i < t.length) {
+        if (skip.has(t[i])) { i += 2; continue; }
+        if (t[i].startsWith("-")) { i += 1; continue; }
+        break;
+      }
+      let verb = t[i] || "dynein";
+      if (verb === "admin" && t[i + 1]) verb = "admin " + t[i + 1];
+      return verb;
+    }
+    function runDynLine(line) {
+      const cmd = line.trim();
+      if (!cmd || cmd.startsWith("#")) return;
+      if (!dyExec) { makeEntry({ op: "dynein", status: "error", request: "$ " + cmd, response: "dynein wasm pkg not loaded", error: true }); return; }
+      const arg = cmd.replace(/^dy\s+/, "");
+      const t0 = performance.now();
+      let out;
+      try { out = dyExec(arg); } catch (e) { out = "error: " + ((e && e.message) || e); }
+      const ms = (performance.now() - t0).toFixed(2);
+      const isErr = /(^|\n)\s*error[:\s\[]|not supported|exception|no such|not found|failed/i.test(out);
+      makeEntry({ op: "dy " + dyVerb(cmd), status: isErr ? "error" : "ok", ms, request: "$ dy " + arg, response: out.trimEnd() || "(no output)", error: isErr });
+    }
+    function runDyn() {
+      let ran = 0;
+      for (const l of dynEl.value.split("\n")) { const s = l.trim(); if (s && !s.startsWith("#")) { runDynLine(l); ran++; } }
+      if (ran) refreshBrowser();
+    }
+    async function initDyneinConsole() {
+      const runBtn = document.getElementById("dyn-run");
+      try {
+        const mod = await import("./pkg-dynein/extenddb_dynein_wasm.js");
+        await mod.default();
+        // route dynein's transport to the shared main engine (one DB for all tabs).
+        mod.set_host_dispatch((target, body) => dispatch_http(target, body));
+        dyExec = mod.dy_exec;
+        runBtn.onclick = runDyn;
+        dynEl.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runDyn(); } });
+        dynEl.value = "dy list\ndy -t Music query Radiohead";
+      } catch (e) {
+        dyExec = null;
+        const tab = document.querySelector('[data-mode="dyn"]');
+        if (tab) { tab.disabled = true; tab.style.opacity = "0.5"; tab.title = "dynein wasm pkg not built"; }
+        runBtn.disabled = true;
+        dynEl.value =
+          "// dynein wasm pkg not built. Build it, then reload:\n" +
+          "//   scripts/dynein-wasm-build.sh --target web --dev --out-dir web-pkg\n" +
+          "//   cp -a crates/dynein-wasm/web-pkg crates/wasm/web/pkg-dynein";
+        logNote("dynein tab unavailable (pkg-dynein not built): " + ((e && e.message) || e));
+      }
+    }
+
+    // ---- Data browser ---------------------------------------------------
+    function fmtAV(av) {
+      if (av == null) return "";
+      if ("S" in av) return av.S;
+      if ("N" in av) return av.N;
+      if ("BOOL" in av) return String(av.BOOL);
+      if ("NULL" in av) return "null";
+      if ("SS" in av) return av.SS.join(", ");
+      if ("NS" in av) return av.NS.join(", ");
+      if ("B" in av || "BS" in av) return "<binary>";
+      return JSON.stringify(av.L ?? av.M ?? av);
+    }
+    function currentTables() {
+      const r = call(P + "ListTables", {});
+      return (r.response && r.response.TableNames) || [];
+    }
+    function refreshBrowser() {
+      const sel = document.getElementById("tbl-select");
+      const tables = currentTables();
+      const prev = sel.value;
+      sel.textContent = "";
+      for (const t of tables) { const o = document.createElement("option"); o.value = t; o.textContent = t; sel.appendChild(o); }
+      if (tables.includes(prev)) sel.value = prev;
+      renderGrid();
+    }
+    function renderGrid() {
+      const sel = document.getElementById("tbl-select");
+      const grid = document.getElementById("grid");
+      const countEl = document.getElementById("tbl-count");
+      grid.textContent = "";
+      const tname = sel.value;
+      if (!tname) { countEl.textContent = "no tables"; return; }
+      const scan = call(P + "Scan", { TableName: tname });
+      const items = (scan.response && scan.response.Items) || [];
+      let keyAttrs = [], keyType = {};
+      const d = call(P + "DescribeTable", { TableName: tname });
+      if (d.response && d.response.Table && d.response.Table.KeySchema) {
+        for (const k of d.response.Table.KeySchema) { keyAttrs.push(k.AttributeName); keyType[k.AttributeName] = k.KeyType; }
+      }
+      const cols = [...keyAttrs];
+      for (const it of items) for (const k of Object.keys(it)) if (!cols.includes(k)) cols.push(k);
+      const thead = document.createElement("thead");
+      const htr = document.createElement("tr");
+      for (const c of cols) {
+        const th = document.createElement("th");
+        th.textContent = keyType[c] === "HASH" ? c + " (partition key)" : keyType[c] === "RANGE" ? c + " (sort key)" : c;
+        htr.appendChild(th);
+      }
+      thead.appendChild(htr); grid.appendChild(thead);
+      const CAP = 50;
+      const shown = items.length > CAP ? items.slice(0, CAP) : items;
+      const tbody = document.createElement("tbody");
+      for (const it of shown) {
+        const tr = document.createElement("tr");
+        for (const c of cols) { const td = document.createElement("td"); td.textContent = fmtAV(it[c]); tr.appendChild(td); }
+        tbody.appendChild(tr);
+      }
+      grid.appendChild(tbody);
+      countEl.textContent = items.length > CAP
+        ? `showing ${CAP} of ${items.length} items`
+        : items.length + (items.length === 1 ? " item" : " items");
+    }
+
+    // ---- Shareable link -------------------------------------------------
+    // SECURITY: the URL hash carries a DECLARATIVE CLI command only, consumed
+    // EXCLUSIVELY by runCli() -> parseCli() (structural parser, no eval). It must
+    // NOT be routed to runSdk() (new Function). Auto-running a #cmd is safe: it can
+    // only dispatch ops against the local in-tab engine. If a future change shares
+    // a JS snippet in the URL, do NOT auto-run it.
+    function shareCurrent() {
+      const cmd = cliEl.value.trim();
+      const rel = location.pathname + (cmd ? "#cmd=" + encodeURIComponent(cmd) : "");
+      history.replaceState(null, "", rel);
+      const url = location.origin + rel;
+      logNote("Shareable link:\n" + url);
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(() => {}, () => {});
+    }
+    function restoreFromHash() {
+      const m = location.hash.match(/^#cmd=(.*)$/);
+      if (!m) return false;
+      try { setMode("cli"); cliEl.value = decodeURIComponent(m[1]); runCli(); return true; }
+      catch { return false; }
+    }
+
+    // ---- wiring ---------------------------------------------------------
+    document.getElementById("cli-run").onclick = runCli;
+    cliEl.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runCli(); } });
+    document.getElementById("cli-share").onclick = shareCurrent;
+    document.getElementById("run").onclick = run;
+    document.getElementById("clear").onclick = () => {
+      logEl.textContent = "";
+      const e = document.createElement("div"); e.className = "empty";
+      e.textContent = "Log cleared. Run something to see entries here.";
+      logEl.appendChild(e);
+    };
+    document.getElementById("reset").onclick = () => {
+      bootEngine();
+      const n = seedMusic();
+      logNote(`Engine reset (fresh in-memory database), re-seeded Music with ${n} items.`);
+      refreshBrowser();
+    };
+    document.getElementById("tbl-select").onchange = renderGrid;
+    document.getElementById("tbl-refresh").onclick = refreshBrowser;
+
+    try {
+      await initWasm();
+      bootEngine();
+      const n = seedMusic();
+      initSdkConsole();
+      await initDyneinConsole();
+      setMode("cli");
+      refreshBrowser();
+      loadSample("Query");
+      logNote(`Seeded ${n} tracks into Music so you're never staring at an empty database. It all runs in this tab: no server, and no network after the initial load.`);
+      restoreFromHash();
+      document.body.setAttribute("data-ready", "true");
+    } catch (e) {
+      logNote("Failed to initialize the WebAssembly engine: " + e);
+    }
+  </script>
+</body>
+</html>

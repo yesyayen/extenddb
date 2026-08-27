@@ -11,6 +11,8 @@ members = [
     "crates/storage-postgres",
     "crates/storage-mongodb",
     "crates/storage-sqlite",
+    "crates/storage-sqlite-wasm",
+    "crates/wasm",
     "crates/auth",
     "crates/server",
     "crates/app",
@@ -33,6 +35,8 @@ extenddb-config = { path = "crates/config" }
 extenddb-storage-postgres = { path = "crates/storage-postgres" }
 extenddb-storage-mongodb = { path = "crates/storage-mongodb" }
 extenddb-storage-sqlite = { path = "crates/storage-sqlite" }
+extenddb-storage-sqlite-wasm = { path = "crates/storage-sqlite-wasm" }
+extenddb-wasm = { path = "crates/wasm" }
 extenddb-auth = { path = "crates/auth" }
 extenddb-server = { path = "crates/server" }
 extenddb-app = { path = "crates/app" }

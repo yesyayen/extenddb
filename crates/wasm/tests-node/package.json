@@ -1,0 +1,10 @@
+{
+  "name": "extenddb-wasm-sdk-test",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Real AWS SDK v3 integration test for the ExtendDB wasm engine (dev-only).",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.700.0"
+  }
+}

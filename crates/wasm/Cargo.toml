@@ -1,0 +1,25 @@
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "extenddb-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde_json = { workspace = true }
+extenddb-core = { workspace = true }
+extenddb-storage = { workspace = true }
+extenddb-auth = { workspace = true }
+extenddb-engine = { workspace = true }
+extenddb-storage-sqlite-wasm = { workspace = true }
+
+# Off wasm32 this crate is empty (see the cfg in lib.rs), so native
+# `cargo build --workspace` stays green and never pulls the wasm-only bindings.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"

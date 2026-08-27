@@ -1,0 +1,16 @@
+{
+  "name": "extenddb-web-sdk-bundle",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bundles the real AWS SDK v3 DynamoDB client + the ExtendDB requestHandler shim into a single browser global (window.ExtendDBSDK) for the in-page SDK console.",
+  "scripts": {
+    "build": "esbuild entry.mjs --bundle --format=iife --global-name=ExtendDBSDK --platform=browser --minify --external:node:stream --outfile=../web/pkg-sdk/extenddb-sdk.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.700.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}

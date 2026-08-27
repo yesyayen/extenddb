@@ -1,0 +1,23 @@
+# Copyright 2026 ExtendDB contributors
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "extenddb-storage-sqlite-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+extenddb-core = { workspace = true }
+extenddb-storage = { workspace = true }
+serde_json = { workspace = true }
+futures = { workspace = true }
+
+# The backend only exists on wasm32 (sqlite-wasm-rs is a wasm-only crate).
+# Off wasm32 this crate is empty, so native `cargo build --workspace` stays
+# green and never pulls the wasm-only bindings.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+sqlite-wasm-rs = "0.5"
+time = { workspace = true, features = ["wasm-bindgen"] }
+uuid = { workspace = true, features = ["js"] }
+bigdecimal = { workspace = true }
