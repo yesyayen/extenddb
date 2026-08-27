@@ -35,3 +35,10 @@ rand = { workspace = true }
 bigdecimal = { workspace = true }
 crc32fast = { workspace = true }
 zeroize = { workspace = true }
+
+[dev-dependencies]
+# The wasm-parity test drives the real engine dispatch over this backend to
+# assert dual-target equality with the browser backend. No cycle: the engine
+# depends on the storage traits, not on this crate.
+extenddb-engine = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

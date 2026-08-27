@@ -1361,6 +1361,7 @@ dependencies = [
  "crc32fast",
  "extenddb-auth",
  "extenddb-core",
+ "extenddb-engine",
  "extenddb-storage",
  "futures",
  "rand 0.9.4",

@@ -1,0 +1,236 @@
+[
+  {
+    "target": "CreateTable",
+    "body": {
+      "TableName": "VP_Cosine",
+      "KeySchema": [{ "AttributeName": "pk", "KeyType": "HASH" }],
+      "AttributeDefinitions": [{ "AttributeName": "pk", "AttributeType": "S" }],
+      "BillingMode": "PAY_PER_REQUEST",
+      "VectorIndexes": [
+        {
+          "IndexName": "vidx",
+          "Dimensions": 3,
+          "DistanceFunction": "COSINE",
+          "VectorAttribute": { "AttributeName": "emb" },
+          "Projection": { "ProjectionType": "ALL" }
+        }
+      ]
+    }
+  },
+  { "target": "DescribeTable", "body": { "TableName": "VP_Cosine" } },
+  {
+    "target": "PutItem",
+    "body": {
+      "TableName": "VP_Cosine",
+      "Item": {
+        "pk": { "S": "a" },
+        "genre": { "S": "x" },
+        "emb": { "L": [{ "N": "1" }, { "N": "0" }, { "N": "0" }] }
+      }
+    }
+  },
+  {
+    "target": "PutItem",
+    "body": {
+      "TableName": "VP_Cosine",
+      "Item": {
+        "pk": { "S": "b" },
+        "emb": { "L": [{ "N": "0" }, { "N": "1" }, { "N": "0" }] }
+      }
+    }
+  },
+  {
+    "target": "PutItem",
+    "body": {
+      "TableName": "VP_Cosine",
+      "Item": {
+        "pk": { "S": "c" },
+        "emb": { "L": [{ "N": "0.6" }, { "N": "0.8" }, { "N": "0" }] }
+      }
+    }
+  },
+  {
+    "target": "PutItem",
+    "body": {
+      "TableName": "VP_Cosine",
+      "Item": { "pk": { "S": "d" } }
+    }
+  },
+  {
+    "target": "SearchVectors",
+    "body": {
+      "TableName": "VP_Cosine",
+      "IndexName": "vidx",
+      "SearchVector": [{ "N": "1" }, { "N": "0" }, { "N": "0" }],
+      "TopK": 2
+    }
+  },
+  {
+    "target": "SearchVectors",
+    "body": {
+      "TableName": "VP_Cosine",
+      "IndexName": "vidx",
+      "SearchVector": [{ "N": "1" }, { "N": "0" }, { "N": "0" }],
+      "TopK": 10
+    }
+  },
+  {
+    "target": "SearchVectors",
+    "body": {
+      "TableName": "VP_Cosine",
+      "IndexName": "vidx",
+      "SearchVector": [{ "N": "1" }, { "N": "0" }, { "N": "0" }],
+      "TopK": 10,
+      "ProjectionExpression": "pk, emb"
+    }
+  },
+  {
+    "target": "UpdateItem",
+    "body": {
+      "TableName": "VP_Cosine",
+      "Key": { "pk": { "S": "b" } },
+      "UpdateExpression": "SET emb = :v",
+      "ExpressionAttributeValues": {
+        ":v": { "L": [{ "N": "0.8" }, { "N": "0.6" }, { "N": "0" }] }
+      }
+    }
+  },
+  {
+    "target": "SearchVectors",
+    "body": {
+      "TableName": "VP_Cosine",
+      "IndexName": "vidx",
+      "SearchVector": [{ "N": "1" }, { "N": "0" }, { "N": "0" }],
+      "TopK": 3
+    }
+  },
+  {
+    "target": "DeleteItem",
+    "body": { "TableName": "VP_Cosine", "Key": { "pk": { "S": "a" } } }
+  },
+  {
+    "target": "SearchVectors",
+    "body": {
+      "TableName": "VP_Cosine",
+      "IndexName": "vidx",
+      "SearchVector": [{ "N": "1" }, { "N": "0" }, { "N": "0" }],
+      "TopK": 3
+    }
+  },
+  {
+    "target": "SearchVectors",
+    "body": {
+      "TableName": "VP_Cosine",
+      "IndexName": "vidx",
+      "SearchVector": [{ "N": "1" }, { "N": "0" }],
+      "TopK": 3
+    }
+  },
+  {
+    "target": "SearchVectors",
+    "body": {
+      "TableName": "VP_Cosine",
+      "IndexName": "nosuch",
+      "SearchVector": [{ "N": "1" }, { "N": "0" }, { "N": "0" }],
+      "TopK": 3
+    }
+  },
+  {
+    "target": "CreateTable",
+    "body": {
+      "TableName": "VP_Scoped",
+      "KeySchema": [{ "AttributeName": "pk", "KeyType": "HASH" }],
+      "AttributeDefinitions": [
+        { "AttributeName": "pk", "AttributeType": "S" },
+        { "AttributeName": "tenant", "AttributeType": "S" },
+        { "AttributeName": "category", "AttributeType": "S" }
+      ],
+      "BillingMode": "PAY_PER_REQUEST",
+      "VectorIndexes": [
+        {
+          "IndexName": "vidx",
+          "Dimensions": 2,
+          "DistanceFunction": "EUCLIDEAN",
+          "VectorAttribute": { "AttributeName": "emb" },
+          "SearchSchema": [
+            { "AttributeName": "tenant", "SearchSchemaElementType": "HASH" },
+            { "AttributeName": "category", "SearchSchemaElementType": "INLINE_FILTER" }
+          ],
+          "Projection": { "ProjectionType": "ALL" }
+        }
+      ]
+    }
+  },
+  {
+    "target": "PutItem",
+    "body": {
+      "TableName": "VP_Scoped",
+      "Item": {
+        "pk": { "S": "p1" },
+        "tenant": { "S": "t1" },
+        "category": { "S": "books" },
+        "emb": { "L": [{ "N": "0" }, { "N": "0" }] }
+      }
+    }
+  },
+  {
+    "target": "PutItem",
+    "body": {
+      "TableName": "VP_Scoped",
+      "Item": {
+        "pk": { "S": "p2" },
+        "tenant": { "S": "t1" },
+        "category": { "S": "electronics" },
+        "emb": { "L": [{ "N": "3" }, { "N": "4" }] }
+      }
+    }
+  },
+  {
+    "target": "PutItem",
+    "body": {
+      "TableName": "VP_Scoped",
+      "Item": {
+        "pk": { "S": "p3" },
+        "tenant": { "S": "t2" },
+        "category": { "S": "books" },
+        "emb": { "L": [{ "N": "1" }, { "N": "1" }] }
+      }
+    }
+  },
+  {
+    "target": "SearchVectors",
+    "body": {
+      "TableName": "VP_Scoped",
+      "IndexName": "vidx",
+      "SearchVector": [{ "N": "0" }, { "N": "0" }],
+      "TopK": 5,
+      "SearchConditionExpression": "tenant = :t",
+      "ExpressionAttributeValues": { ":t": { "S": "t1" } }
+    }
+  },
+  {
+    "target": "SearchVectors",
+    "body": {
+      "TableName": "VP_Scoped",
+      "IndexName": "vidx",
+      "SearchVector": [{ "N": "0" }, { "N": "0" }],
+      "TopK": 5,
+      "SearchConditionExpression": "tenant = :t AND category = :c",
+      "ExpressionAttributeValues": {
+        ":t": { "S": "t1" },
+        ":c": { "S": "books" }
+      }
+    }
+  },
+  {
+    "target": "SearchVectors",
+    "body": {
+      "TableName": "VP_Scoped",
+      "IndexName": "vidx",
+      "SearchVector": [{ "N": "0" }, { "N": "0" }],
+      "TopK": 5
+    }
+  },
+  { "target": "DeleteTable", "body": { "TableName": "VP_Cosine" } },
+  { "target": "DeleteTable", "body": { "TableName": "VP_Scoped" } }
+]
