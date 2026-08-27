@@ -1150,12 +1150,12 @@ name = "extenddb-auth"
 version = "0.1.10"
 dependencies = [
  "async-trait",
- "axum",
  "extenddb-cache",
  "extenddb-core",
  "futures",
  "hex",
  "hmac 0.12.1",
+ "http",
  "serde_json",
  "sha2 0.10.9",
  "thiserror",
@@ -3782,6 +3782,7 @@ checksum = "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c"
 dependencies = [
  "deranged",
  "itoa",
+ "js-sys",
  "num-conv",
  "powerfmt",
  "serde_core",

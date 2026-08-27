@@ -133,6 +133,7 @@ pub type StorageConfigDeserializer = fn(&toml::Table) -> Result<Box<dyn StorageC
 /// Uses the deserializer of the [`Backend`](crate::Backend) installed via
 /// [`set_backend`](crate::set_backend), invoking it with the provided TOML
 /// table.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn deserialize_storage_config(table: &toml::Table) -> Result<Box<dyn StorageConfig>, String> {
     let backend = crate::backend::try_backend()
         .ok_or_else(|| "no storage backend installed (set_backend was not called)".to_owned())?;

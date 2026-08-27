@@ -35,7 +35,7 @@ pub struct ServerComponents {
     /// constructing the auth provider.
     pub credential_store: Arc<dyn CredentialStore>,
 
-    /// Optional backend-specific runtime hooks for worker spawning
+    /// Optional backend-specific runtime hooks for worker spawning.
     pub runtime_hooks: Option<Box<dyn ServerRuntimeHooks>>,
 }
 

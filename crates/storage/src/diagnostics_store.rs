@@ -35,6 +35,7 @@ pub type DiagnosticsStoreFactory =
     fn(&str) -> BoxFuture<'static, Result<Box<dyn DiagnosticsStore>, DiagnosticsStoreError>>;
 
 /// Create a diagnostics store for the installed backend.
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn create_diagnostics_store(
     connection_string: &str,
 ) -> Result<Box<dyn DiagnosticsStore>, DiagnosticsStoreError> {

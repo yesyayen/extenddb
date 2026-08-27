@@ -35,6 +35,7 @@ pub type SettingsStoreFactory =
     fn(&str) -> BoxFuture<'static, Result<Box<dyn SettingsStore>, SettingsStoreError>>;
 
 /// Create a settings store for the installed backend.
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn create_settings_store(
     connection_string: &str,
 ) -> Result<Box<dyn SettingsStore>, SettingsStoreError> {

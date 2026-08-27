@@ -20,4 +20,42 @@ crc32fast = { workspace = true }
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
+
+# tokio is native-only, and the import and export surface is gated to match.
+# Every claim here is a command with the value it must produce. The gating does
+# not make this crate run on wasm32: streams.rs calls std::time::SystemTime::now
+# at three sites, which panics on that target.
+#
+#   cargo check --target wasm32-unknown-unknown -p extenddb-engine
+#     exits 0. It reported 49 errors before the gates, every one from mio.
+#
+#   cargo check --target wasm32-unknown-unknown --all-targets -p extenddb-engine
+#     exits 0.
+#
+#   cargo tree --target wasm32-unknown-unknown -p extenddb-engine -i tokio
+#   cargo tree --target wasm32-unknown-unknown -p extenddb-engine -i mio
+#     each print nothing on stdout and "nothing to print" on stderr. Remove the
+#     gate below and the mio form prints three lines: mio, then tokio, then
+#     extenddb-engine.
+#
+#   cargo tree --target wasm32-unknown-unknown -p extenddb-engine -i serde
+#     prints a non-empty tree.
+#
+#   rg -n 'target_arch = "wasm32"' crates/engine/src/
+#     reports 8: six #[cfg(not(...))] gates, one bare #[cfg] on the empty wasm
+#     arm of FILE_OPERATIONS, and one cfg!() in the const assertion that pins
+#     that arm's length per target. 7 means one was dropped; 9 means one was
+#     added that neither tokio nor the two file handlers require. On the same
+#     file, rg -o 'target_arch' reports 9: the ninth is the GATE constant in the
+#     test module.
+#
+#   cargo test -p extenddb-engine
+#     exits 0.
+#
+#   cargo test -p extenddb-engine -- --list | rg -c 'dispatch_arms'
+#     prints 2 and exits 0. One renamed or removed guard prints 1, both prints
+#     nothing and exits 1. Those two read the dispatch arms out of lib.rs and
+#     require the gated ones to be exactly the FILE_OPERATIONS names.
+#
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true }

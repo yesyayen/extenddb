@@ -14,11 +14,22 @@ description = "In-memory stale-while-revalidate cache primitive used by the auth
 test-util = []
 
 [dependencies]
-moka = { workspace = true }
 serde = { workspace = true }
-tokio = { workspace = true }
-tracing = { workspace = true }
 futures = { workspace = true }
 
-[dev-dependencies]
+# moka stores the entries and tokio spawns the background refresh. Neither
+# targets wasm32-unknown-unknown, so on wasm32 the cache is the pass-through in
+# src/swr_wasm.rs and neither dependency is compiled. tracing joins them
+# because its one use is the refresh path's warning in src/swr.rs, which is
+# native-only: a log line added to the wasm shim should fail to compile here
+# rather than carry a dependency nothing on that target uses.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+moka = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+# The test module is compiled on native only (see src/lib.rs), and cargo tree
+# reports dev-dependencies by default, so this is gated too: without the gate
+# tokio shows up in the wasm dependency graph of a crate that does not use it.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }

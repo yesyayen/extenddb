@@ -8,21 +8,67 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-aes-gcm = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
-bcrypt = { workspace = true }
 bigdecimal = { workspace = true }
 extenddb-auth = { workspace = true }
 extenddb-core = { workspace = true }
 futures = { workspace = true }
-rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
-tokio = { workspace = true }
-tokio-util = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+# These five are native-only, and their use sites are gated to match. Every claim
+# here is a command with the value it must produce, and nothing here describes
+# what an instrument can or cannot prove.
+#
+#   cargo tree --target wasm32-unknown-unknown -p extenddb-storage --edges normal
+#     lists none of the five.
+#
+#   cargo check --target wasm32-unknown-unknown -p extenddb-storage
+#     exits 0.
+#
+#   cargo check --target wasm32-unknown-unknown --all-targets -p extenddb-storage
+#     exits 0. It reported 16 errors before the three test-module gates.
+#
+#   rg -n 'target_arch = "wasm32"' crates/storage/src/
+#     reports 25, every hit inside not(...). 24 means a gate was dropped; 26 means
+#     one was added that no gated crate or gated module requires. rustfmt
+#     normalises a gate written without spaces, so the 25 holds only while
+#     cargo fmt --all -- --check passes.
+#
+#   cargo tree --target wasm32-unknown-unknown -p extenddb-storage -i getrandom@0.2.17
+#   cargo tree --target wasm32-unknown-unknown -p extenddb-storage -i getrandom@0.3.4
+#   cargo tree --target wasm32-unknown-unknown -p extenddb-storage -i getrandom@0.4.2
+#     each print nothing. Drop --target and each prints its native routes: 0.2.17
+#     through aes-gcm, whose printout also contains bcrypt once and extenddb-auth
+#     twice by feature unification beneath aes-gcm rather than as routes of their
+#     own; 0.3.4 through bcrypt and rand; 0.4.2 through the single uuid node,
+#     reached from extenddb-core and from moka. Only the first two are closed
+#     by the gates here; uuid declares getrandom 0.4 off wasm32-unknown itself.
+#
+#   cargo tree -p extenddb-storage -e features -i rand_core@0.6.4
+#     shows aes-gcm activating the feature named getrandom, through aead.
+#     rand_core 0.9.5 has no feature of that name; its getrandom-backed feature is
+#     os_rng, which is how rand reaches 0.3.4.
+#
+#   cargo check --target wasm32-unknown-unknown -p extenddb-auth
+#     exits 0, which is why extenddb-auth is not gated here although the RFC row
+#     lists it.
+#
+#   cargo check --target wasm32-unknown-unknown --all-targets -p extenddb-auth
+#     exits 0, since that crate gates its own tokio dev-dependency.
+#
+#   cargo tree --target wasm32-unknown-unknown -p extenddb-storage -i getrandom
+#     exits 101. Use the version-pinned forms above instead.
+#
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+aes-gcm = { workspace = true }
+bcrypt = { workspace = true }
+rand = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }

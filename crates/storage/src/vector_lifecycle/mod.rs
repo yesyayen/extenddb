@@ -71,6 +71,12 @@
 //! and a backfill.
 
 mod backfill;
+// The build driver sleeps between batches and tracks deadlines with
+// `tokio::time`, which does not exist on wasm32-unknown-unknown. The browser
+// build has no detached build task (no background workers run there), so the
+// whole driver module is native-only. The pure row-shape helpers below (meta,
+// partition, payload, backfill classification) stay on both targets.
+#[cfg(not(target_arch = "wasm32"))]
 mod build;
 mod meta;
 mod partition;
@@ -79,6 +85,7 @@ mod payload;
 pub use backfill::{
     BACKFILL_BATCH, BackfillOutcome, BackfillRow, BatchOutcome, classify_backfill_row,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use build::{VectorIndexBuild, complete_build, rebuild_index, run_backfill};
 pub use meta::{VectorApplyContext, VectorIndexMeta, item_is_indexable, item_partition};
 pub use partition::{UNSCOPED_PARTITION, partition_value};

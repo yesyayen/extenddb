@@ -8,29 +8,50 @@
 //! methods receive `account_id` from the authenticated identity.
 
 pub mod authorization_store;
+// The backend registry and the server-components surface are native-only, per
+// the RFC row this task implements. They are gated as whole modules rather than
+// by cfg-ing a field, because backend.rs holds a ServerComponentsFactory field
+// and server_components.rs calls try_backend, so the two are mutually
+// dependent: ungating backend alone fails with error[E0432], an unresolved
+// import of crate::server_components, and ungating server_components alone
+// fails with error[E0433], cannot find backend in crate. rustc prints an
+// error[E0432] for crate::hooks before that one, which is a third gated module
+// rather than the dependency at issue. A cfg on the field would compile, and it
+// would leave a public struct one field short on wasm32, which is worse for the
+// out-of-tree authors both structs are documented for.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod backend;
 pub mod bootstrapper;
 pub mod config;
 pub mod diagnostics;
 pub mod diagnostics_store;
 pub mod error;
+// The runtime-hooks surface is native-only: `spawn_workers` returns
+// `Vec<tokio::task::JoinHandle<()>>` and the module drives a tokio timer, so it
+// cannot cross to wasm32. Gated as a module rather than by changing that
+// signature, which three backend impls and crates/server/src/serve.rs depend on.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod hooks;
 pub mod management_store;
 pub mod operations;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod server_components;
 pub mod settings_store;
 pub mod transact;
 pub mod vector_catalog;
 pub mod vector_lifecycle;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use backend::{Backend, BackendAlreadySet, backend_name, set_backend, try_backend};
 
 pub use transact::{IdempotencyKey, TransactGetOp, TransactWriteOp};
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use server_components::{
     BackendError, ServerComponents, ServerComponentsFactory, create_server_components,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use hooks::{CancellationToken, ServerRuntimeHooks, WorkerContext, sleep_or_shutdown};
 
 /// Pluggable lookup for `TableKeyInfo`.
@@ -794,7 +815,7 @@ mod tests {
 /// `search_vectors` must fail rather than return an empty result set, because a
 /// silent empty answer to a search is indistinguishable from a table with no
 /// matches.
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod vector_opt_out_tests {
     use super::*;
 

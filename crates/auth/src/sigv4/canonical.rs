@@ -6,7 +6,7 @@
 //! Builds the canonical request string from the HTTP method, URI path,
 //! query string, signed headers, and body hash per the AWS `SigV4` spec.
 
-use axum::http::HeaderMap;
+use http::HeaderMap;
 use sha2::{Digest, Sha256};
 
 /// Build the canonical request string.
@@ -111,7 +111,7 @@ pub(crate) fn sha256_hex(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::HeaderMap;
+    use http::HeaderMap;
 
     #[test]
     fn canonical_request_basic() {

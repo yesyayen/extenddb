@@ -209,6 +209,7 @@ pub type BootstrapperFactory =
 ///
 /// Calls the bootstrapper factory of the [`Backend`](crate::Backend) installed
 /// via [`set_backend`](crate::set_backend).
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn create_bootstrapper(
     config_path: &str,
     cli_args: &[String],
@@ -222,10 +223,14 @@ pub async fn create_bootstrapper(
 
 /// Helper functions for bootstrapper implementations.
 pub mod helpers {
+    // Both are used only by `hash_password_async`, which is native-only below.
+    #[cfg(not(target_arch = "wasm32"))]
     use crate::management_store::OpError;
+    #[cfg(not(target_arch = "wasm32"))]
     use crate::management_store::OpResult;
 
     /// Generate a random 12-digit numeric account ID (matches AWS account ID format).
+    #[cfg(not(target_arch = "wasm32"))]
     #[must_use]
     pub fn generate_account_id() -> String {
         use rand::Rng;
@@ -239,6 +244,7 @@ pub mod helpers {
     /// Restricted to `[a-zA-Z0-9]` to avoid URL-encoding issues in form submissions,
     /// shell copy-paste problems, and other contexts where special characters break.
     /// At 24 characters from a 62-char alphabet, entropy is ~143 bits.
+    #[cfg(not(target_arch = "wasm32"))]
     #[must_use]
     pub fn generate_random_password() -> String {
         use rand::Rng;
@@ -253,6 +259,7 @@ pub mod helpers {
     ///
     /// bcrypt is CPU-intensive and should not block the async runtime.
     /// This function spawns a blocking task to perform the hash operation.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn hash_password_async(password: String) -> OpResult<String> {
         tokio::task::spawn_blocking(move || bcrypt::hash(password, bcrypt::DEFAULT_COST))
             .await
@@ -264,6 +271,7 @@ pub mod helpers {
     ///
     /// Uses `aes_gcm::Aes256Gcm::generate_key` with `OsRng` for cryptographically
     /// secure random key generation.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn generate_encryption_key() -> String {
         use aes_gcm::KeyInit;
         use base64::Engine;
@@ -317,7 +325,7 @@ pub mod helpers {
         args.windows(2).find(|w| w[0] == flag).map(|w| w[1].clone())
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     mod tests {
         use super::*;
 
@@ -578,7 +586,7 @@ pub mod helpers {
 /// stops compiling, which is the same breakage an out-of-tree backend crate
 /// would hit. It also pins object safety by boxing as `dyn Bootstrapper`, and
 /// checks that the defaulted migration-lock methods are usable no-ops.
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod out_of_tree_compat_tests {
     use super::*;
     use crate::management_store::OpResult;
