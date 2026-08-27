@@ -26,7 +26,8 @@ use extenddb_storage::error::StorageError;
 use extenddb_storage::{
     BackupEngine, DataEngine, IdempotencyKey, ItemPairResult, MetadataEngine, QueryResult,
     StreamCapture, StreamEngine, StreamListResult, StreamRecordsResult, TableEngine, TransactGetOp,
-    TransactWriteOp, TtlTableInfo, WorkerStore,
+    TransactWriteOp, TtlTableInfo, VectorSearch, VectorSearchEngine, VectorSearchResult,
+    WorkerStore,
 };
 
 use crate::db::WasmDb;
@@ -269,6 +270,13 @@ impl DataEngine for SqliteWasmEngine {
         unsupported()
     }
 
+    fn as_vector_search(&self) -> Option<&dyn VectorSearchEngine> {
+        // Not a capability flag: returning `Some` hands the engine the
+        // implementation below, and is what admits vector indexes on
+        // CreateTable and routes SearchVectors here.
+        Some(self)
+    }
+
     fn transact_write_items(
         &self,
         _ops: &[TransactWriteOp<'_>],
@@ -282,6 +290,34 @@ impl DataEngine for SqliteWasmEngine {
         _max_age_seconds: i64,
     ) -> BoxFuture<'_, Result<u64, StorageError>> {
         unsupported()
+    }
+}
+
+impl VectorSearchEngine for SqliteWasmEngine {
+    fn search_vectors(&self, req: VectorSearch<'_>) -> BoxFuture<'_, VectorSearchResult> {
+        // Own what the body needs so the future is not tied to the caller's
+        // frame, mirroring the native implementation; the body itself is
+        // synchronous, like every other method on this backend.
+        let table_id = req.key_info.table_id.clone();
+        let index_name = req.index_name.to_owned();
+        let query_vector = req.query_vector.to_vec();
+        let top_k = req.top_k;
+        let partition = extenddb_storage::vector_lifecycle::partition_value(req.hash_key);
+        let filters: Vec<(String, extenddb_core::types::AttributeValue)> = req
+            .filters
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).clone()))
+            .collect();
+        Box::pin(async move {
+            self.search_vectors_impl(
+                &table_id,
+                &index_name,
+                &query_vector,
+                top_k,
+                &partition?,
+                &filters,
+            )
+        })
     }
 }
 

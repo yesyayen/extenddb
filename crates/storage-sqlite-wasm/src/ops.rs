@@ -17,7 +17,7 @@ use extenddb_core::types::{
     AttributeDefinition, AttributeValue, BillingMode, BillingModeSummary, CreateTableInput,
     DeleteTableInput, Item, KeySchemaElement, KeyType, ListTablesInput, ListTablesOutput,
     ProvisionedThroughput, ProvisionedThroughputDescription, ScalarAttributeType, TableDescription,
-    TableKeyInfo, TableStatus,
+    TableKeyInfo, TableStatus, VectorIndexDescription,
 };
 use extenddb_storage::error::StorageError;
 use extenddb_storage::util::table_arn;
@@ -37,7 +37,7 @@ fn intern<E: std::fmt::Display>(e: E) -> StorageError {
 /// that differ only by formatting (`{"N":"1"}` vs `{"N":"1.0"}`) would compare
 /// as distinct. Correct for string keys and for equal formatting on both write
 /// and read paths.
-fn extract_keys(
+pub(crate) fn extract_keys(
     key_schema: &[KeySchemaElement],
     item: &Item,
 ) -> Result<(String, String), StorageError> {
@@ -178,10 +178,10 @@ impl SqliteWasmEngine {
         account_id: &str,
         input: CreateTableInput,
     ) -> Result<TableDescription, StorageError> {
-        // This backend implements base tables only. Refuse index requests
-        // instead of accepting them and then lying in DescribeTable: a
-        // silently dropped index would surface later as missing data, with
-        // no error pointing back here.
+        // This backend implements base tables and vector indexes only. Refuse
+        // secondary-index requests instead of accepting them and then lying in
+        // DescribeTable: a silently dropped index would surface later as
+        // missing data, with no error pointing back here.
         if input
             .global_secondary_indexes
             .as_ref()
@@ -190,11 +190,9 @@ impl SqliteWasmEngine {
                 .local_secondary_indexes
                 .as_ref()
                 .is_some_and(|v| !v.is_empty())
-            || input.vector_indexes.as_ref().is_some_and(|v| !v.is_empty())
         {
             return Err(StorageError::Validation(
-                "secondary and vector indexes are not supported by the browser/WASM backend"
-                    .to_string(),
+                "secondary indexes are not supported by the browser/WASM backend".to_string(),
             ));
         }
         let table_id = uuid::Uuid::new_v4().to_string();
@@ -217,6 +215,10 @@ impl SqliteWasmEngine {
             .map_err(intern)?;
         let deletion_protection = input.deletion_protection_enabled.unwrap_or(false);
 
+        // The catalog row and the vector index rows land in one transaction,
+        // matching the native backend: a table must not exist with half its
+        // declared indexes.
+        self.db.begin_immediate().map_err(StorageError::Internal)?;
         let result = self.db.execute(
             "INSERT INTO tables \
              (account_id, table_name, table_id, key_schema, attribute_definitions, \
@@ -240,12 +242,51 @@ impl SqliteWasmEngine {
             ],
         );
         if let Err(e) = result {
+            let _ = self.db.rollback();
             return if is_unique_violation(&e) {
                 Err(StorageError::TableAlreadyExists(input.table_name.clone()))
             } else {
                 Err(StorageError::Internal(e))
             };
         }
+        if let Some(vis) = &input.vector_indexes
+            && let Err(e) = self.insert_vector_catalog_rows(&table_id, vis)
+        {
+            let _ = self.db.rollback();
+            return Err(e);
+        }
+        self.db.commit().map_err(StorageError::Internal)?;
+
+        // Echo the vector indexes we just created. Built from the request rather
+        // than re-read from the catalog, which would add a round trip to say
+        // something already known. The table is ACTIVE at birth here, so each
+        // index is ACTIVE with no `backfilling` member.
+        let vector_index_descs: Option<Vec<VectorIndexDescription>> = input
+            .vector_indexes
+            .as_ref()
+            .map(|vis| {
+                vis.iter()
+                    .map(|vi| VectorIndexDescription {
+                        index_name: vi.index_name.clone(),
+                        vector_attribute: vi.vector_attribute.clone(),
+                        dimensions: vi.dimensions,
+                        search_schema: vi.search_schema_for_storage().map(<[_]>::to_vec),
+                        distance_function: vi.distance_function,
+                        index_status: extenddb_core::types::IndexStatus::Active,
+                        backfilling: None,
+                        index_size_bytes: 0,
+                        item_count: 0,
+                        index_arn: extenddb_storage::util::index_arn(
+                            &self.region,
+                            account_id,
+                            &input.table_name,
+                            &vi.index_name,
+                        ),
+                        projection: vi.projection.clone(),
+                    })
+                    .collect()
+            })
+            .filter(|v: &Vec<_>| !v.is_empty());
 
         let (rcu, wcu) = input.provisioned_throughput.as_ref().map_or((0, 0), |pt| {
             (pt.read_capacity_units, pt.write_capacity_units)
@@ -262,6 +303,7 @@ impl SqliteWasmEngine {
             rcu,
             wcu,
             deletion_protection,
+            vector_index_descs,
         ))
     }
 
@@ -290,6 +332,12 @@ impl SqliteWasmEngine {
         let attribute_definitions: Vec<AttributeDefinition> =
             serde_json::from_str(row.text(2).unwrap_or("[]")).map_err(intern)?;
 
+        // The vector index metadata is what lets the engine validate vector
+        // attributes on writes, exactly as the native backend's key info does.
+        let vector_indexes = extenddb_storage::vector_catalog::vector_index_key_info(
+            self.vector_catalog_rows(&table_id)?,
+        )?;
+
         Ok(TableKeyInfo {
             table_name: table_name.to_string(),
             account_id: account_id.to_string(),
@@ -298,12 +346,12 @@ impl SqliteWasmEngine {
             key_schema,
             attribute_definitions,
             has_lsi: false,
-            // The wasm backend does not implement secondary or vector indexes
+            // The wasm backend does not implement secondary indexes
             // (CreateTable rejects them), so these are always empty here.
             global_secondary_indexes: Vec::new(),
             local_secondary_indexes: Vec::new(),
             stream_specification: None,
-            vector_indexes: Vec::new(),
+            vector_indexes,
         })
     }
 
@@ -342,6 +390,8 @@ impl SqliteWasmEngine {
                 ],
             )
             .map_err(StorageError::Internal)?;
+        // Inline, as everything here is: the native backend's delay-0 arm.
+        self.maintain_vector_indexes(key_info, None, Some(item))?;
         Ok(if return_old { old } else { None })
     }
 
@@ -433,6 +483,16 @@ impl SqliteWasmEngine {
                 "DELETE FROM items WHERE table_id = ?",
                 &[Val::Text(&desc.table_id)],
             )?;
+            // The index data and catalog rows go with the table, as native's
+            // transactional delete drops the per-index data tables.
+            self.db.execute(
+                "DELETE FROM vector_rows WHERE table_id = ?",
+                &[Val::Text(&desc.table_id)],
+            )?;
+            self.db.execute(
+                "DELETE FROM vector_indexes WHERE table_id = ?",
+                &[Val::Text(&desc.table_id)],
+            )?;
             self.db.execute(
                 "DELETE FROM tables WHERE account_id = ? AND table_name = ?",
                 &[Val::Text(account_id), Val::Text(&input.table_name)],
@@ -483,6 +543,9 @@ impl SqliteWasmEngine {
                 ],
             )
             .map_err(StorageError::Internal)?;
+        // A delete's maintenance is pure removal; the key carries the base key,
+        // which is all the removal needs.
+        self.maintain_vector_indexes(key_info, Some(key), None)?;
         Ok(if return_old { old } else { None })
     }
 
@@ -512,9 +575,8 @@ impl SqliteWasmEngine {
         // Start from the existing image, or from the key for a fresh upsert.
         let mut item = old.clone().unwrap_or_else(|| key.clone());
         // `apply_update_validated` re-validates vector attributes on the
-        // post-apply image; this backend has no vector indexes (CreateTable
-        // rejects them), so `key_info.vector_indexes` is always empty and the
-        // call reduces to the plain update semantics.
+        // post-apply image against the table's vector indexes, exactly as the
+        // native engine path does.
         apply_update_validated(
             actions,
             &mut item,
@@ -542,6 +604,8 @@ impl SqliteWasmEngine {
                 ],
             )
             .map_err(StorageError::Internal)?;
+        // The post-apply image is the new truth for every vector index.
+        self.maintain_vector_indexes(key_info, None, Some(&item))?;
 
         let old_ret = if return_old { old } else { None };
         let new_ret = if return_new { Some(item) } else { None };
@@ -735,6 +799,15 @@ impl SqliteWasmEngine {
             _ => (0, 0),
         };
         let deletion_protection = r.i64(8).unwrap_or(0) != 0;
+        // The index descriptions come from the catalog through the shared
+        // decoder, so the wire rules (absent-when-empty, readiness) match every
+        // other backend.
+        let vector_indexes = extenddb_storage::vector_catalog::vector_index_descriptions(
+            &self.region,
+            account_id,
+            table_name,
+            self.vector_catalog_rows(&table_id)?,
+        )?;
         Ok(Some(build_table_description(
             table_name.to_string(),
             key_schema,
@@ -747,12 +820,13 @@ impl SqliteWasmEngine {
             rcu,
             wcu,
             deletion_protection,
+            vector_indexes,
         )))
     }
 }
 
 /// Build a `TableDescription` from stored catalog fields (M2a/M2b: zeros for
-/// sizes/throughput, no indexes/streams).
+/// sizes/throughput, no secondary indexes/streams).
 #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
 fn build_table_description(
     table_name: String,
@@ -766,6 +840,7 @@ fn build_table_description(
     rcu: i64,
     wcu: i64,
     deletion_protection_enabled: bool,
+    vector_indexes: Option<Vec<VectorIndexDescription>>,
 ) -> TableDescription {
     let creation_date_time = creation_epoch as f64;
     let billing_mode_summary = match billing_mode {
@@ -803,6 +878,6 @@ fn build_table_description(
         table_class_summary: None,
         on_demand_throughput: None,
         restore_summary: None,
-        vector_indexes: None,
+        vector_indexes,
     }
 }

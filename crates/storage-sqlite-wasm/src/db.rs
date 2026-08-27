@@ -306,7 +306,7 @@ fn read_cell(stmt: *mut ffi::sqlite3_stmt, c: c_int) -> Cell {
             if p.is_null() || n <= 0 {
                 Cell::Text(String::new())
             } else {
-                let bytes = slice::from_raw_parts(p as *const u8, n as usize);
+                let bytes = slice::from_raw_parts(p, n as usize);
                 Cell::Text(String::from_utf8_lossy(bytes).into_owned())
             }
         }

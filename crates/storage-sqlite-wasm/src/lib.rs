@@ -32,5 +32,6 @@ pub mod db;
 pub mod engine;
 mod ops;
 mod schema;
+mod vector;
 
 pub use engine::SqliteWasmEngine;
