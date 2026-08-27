@@ -88,6 +88,18 @@
     .samples button { font-size: 12.5px; padding: 5px 10px; }
 
     select { background: var(--input-bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; font-size: 13.5px; }
+
+    /* Vectors tab */
+    .vec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+    .vec-grid .wide { grid-column: 1 / -1; }
+    .vec-grid select { width: 100%; }
+    #vec-query { height: 64px; }
+    #vec-results-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 6px; margin-top: 12px; max-height: 260px; }
+    #vec-results-wrap:not(:has(tr)) { display: none; }
+    table#vec-results { border-collapse: collapse; width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+    #vec-results th, #vec-results td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; white-space: nowrap; }
+    #vec-results th { position: sticky; top: 0; background: var(--panel); color: var(--muted); }
+    #vec-results tbody tr:nth-child(even) { background: var(--panel); }
     .browser-section { padding: 16px 24px 30px; border-top: 1px solid var(--border); }
     #grid-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 6px; margin-top: 8px; max-height: 320px; }
     table#grid { border-collapse: collapse; width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
@@ -151,6 +163,7 @@
         <button class="tab active" data-mode="cli" data-testid="tab-cli">CLI</button>
         <button class="tab" data-mode="sdk" data-testid="tab-sdk">JS SDK</button>
         <button class="tab" data-mode="raw" data-testid="tab-raw">Raw JSON</button>
+        <button class="tab" data-mode="vec" data-testid="tab-vec">Vectors</button>
         <button class="tab" data-mode="dyn" data-testid="tab-dyn">dynein</button>
       </div>
 
@@ -190,6 +203,41 @@
         <div class="row samples" id="sample-buttons"></div>
       </div>
 
+      <div class="panel" id="panel-vec" data-testid="panel-vec" hidden>
+        <label class="samples-label">Create a table with a vector index (hash key <code>pk</code>, type S)</label>
+        <div class="vec-grid">
+          <div><label for="vec-new-table">Table name</label><input id="vec-new-table" data-testid="vec-new-table" spellcheck="false" value="Vectors" /></div>
+          <div><label for="vec-new-index">Index name</label><input id="vec-new-index" data-testid="vec-new-index" spellcheck="false" value="vidx" /></div>
+          <div><label for="vec-new-attr">Vector attribute</label><input id="vec-new-attr" data-testid="vec-new-attr" spellcheck="false" value="emb" /></div>
+          <div><label for="vec-new-dims">Dimensions</label><input id="vec-new-dims" data-testid="vec-new-dims" spellcheck="false" value="8" /></div>
+          <div class="wide"><label for="vec-new-metric">Distance metric</label>
+            <select id="vec-new-metric" data-testid="vec-new-metric">
+              <option value="COSINE">COSINE</option>
+              <option value="EUCLIDEAN">EUCLIDEAN</option>
+              <option value="DOT_PRODUCT">DOT_PRODUCT</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <button id="vec-create" data-testid="vec-create" class="primary">Create table</button>
+        </div>
+
+        <label class="samples-label">Search vectors: exact nearest-neighbor scan (lower score = closer, except DOT_PRODUCT)</label>
+        <div class="vec-grid">
+          <div><label for="vec-table">Table</label><select id="vec-table" data-testid="vec-table"></select></div>
+          <div><label for="vec-index">Vector index</label><select id="vec-index" data-testid="vec-index"></select></div>
+          <div><label for="vec-item">Query: pick an item&hellip;</label><select id="vec-item" data-testid="vec-item"></select></div>
+          <div><label for="vec-k">TopK</label><input id="vec-k" data-testid="vec-k" spellcheck="false" value="5" /></div>
+          <div class="wide"><label for="vec-query">&hellip;or type a query vector (JSON array of numbers)</label>
+            <textarea id="vec-query" data-testid="vec-query" spellcheck="false" placeholder="[0.9, 0.2, 0.3, 0, 0.7, 0.4, 0.3, 0.62]"></textarea></div>
+        </div>
+        <div class="row">
+          <button id="vec-run" data-testid="vec-run" class="primary">Search &#9654;</button>
+          <button id="vec-refresh" data-testid="vec-refresh">Refresh tables</button>
+        </div>
+        <div id="vec-results-wrap"><table id="vec-results" data-testid="vec-results"></table></div>
+      </div>
+
       <div class="panel" id="panel-dyn" data-testid="panel-dyn" hidden>
         <label class="samples-label">The real <code>awslabs/dynein</code> CLI, compiled to wasm, driving this same in-tab engine</label>
         <div class="row samples" id="dyn-samples"></div>
@@ -209,6 +257,7 @@
       <select id="tbl-select" data-testid="tbl-select"></select>
       <button id="tbl-refresh" data-testid="tbl-refresh">Refresh</button>
       <button id="reset" data-testid="reset">Reset engine</button>
+      <span id="tbl-vector" class="pill" data-testid="tbl-vector" hidden></span>
       <span id="tbl-count" class="pill" data-testid="tbl-count" style="margin-left:auto"></span>
     </div>
     <div id="grid-wrap">
@@ -323,7 +372,10 @@
       return { statusCode: parsed.statusCode, response };
     }
 
-    // ---- seed data (30 tracks) ------------------------------------------
+    // ---- seed data (30 tracks, each with an 8-d feature embedding) -------
+    // Embedding dims (hand-crafted, 0..1): [rock, electronic, pop, hiphop,
+    // energy, mellow, acoustic, era] with era = (year - 1960) / 60. Small on
+    // purpose: enough for sensible nearest-neighbor demos, no model needed.
     const MUSIC_TABLE = {
       TableName: "Music",
       KeySchema: [
@@ -335,41 +387,51 @@
         { AttributeName: "SongTitle", AttributeType: "S" },
       ],
       BillingMode: "PAY_PER_REQUEST",
+      VectorIndexes: [
+        {
+          IndexName: "vidx",
+          Dimensions: 8,
+          DistanceFunction: "COSINE",
+          VectorAttribute: { AttributeName: "emb" },
+          Projection: { ProjectionType: "ALL" },
+        },
+      ],
     };
     const MUSIC_RAW = [
-      ["Radiohead", "Paranoid Android", "OK Computer", 1997],
-      ["Radiohead", "Karma Police", "OK Computer", 1997],
-      ["Radiohead", "Creep", "Pablo Honey", 1993],
-      ["Radiohead", "No Surprises", "OK Computer", 1997],
-      ["Daft Punk", "One More Time", "Discovery", 2001],
-      ["Daft Punk", "Get Lucky", "Random Access Memories", 2013],
-      ["Daft Punk", "Harder Better Faster Stronger", "Discovery", 2001],
-      ["Nirvana", "Smells Like Teen Spirit", "Nevermind", 1991],
-      ["Nirvana", "Come As You Are", "Nevermind", 1991],
-      ["The Beatles", "Come Together", "Abbey Road", 1969],
-      ["The Beatles", "Here Comes the Sun", "Abbey Road", 1969],
-      ["Pink Floyd", "Money", "The Dark Side of the Moon", 1973],
-      ["Pink Floyd", "Time", "The Dark Side of the Moon", 1973],
-      ["Queen", "Bohemian Rhapsody", "A Night at the Opera", 1975],
-      ["Queen", "Don't Stop Me Now", "Jazz", 1978],
-      ["Led Zeppelin", "Stairway to Heaven", "Led Zeppelin IV", 1971],
-      ["Fleetwood Mac", "Dreams", "Rumours", 1977],
-      ["Fleetwood Mac", "Go Your Own Way", "Rumours", 1977],
-      ["Michael Jackson", "Billie Jean", "Thriller", 1982],
-      ["Michael Jackson", "Beat It", "Thriller", 1982],
-      ["Prince", "Purple Rain", "Purple Rain", 1984],
-      ["David Bowie", "Heroes", "Heroes", 1977],
-      ["The Rolling Stones", "Paint It Black", "Aftermath", 1966],
-      ["Amy Winehouse", "Rehab", "Back to Black", 2006],
-      ["Arctic Monkeys", "Do I Wanna Know?", "AM", 2013],
-      ["Tame Impala", "The Less I Know the Better", "Currents", 2015],
-      ["Gorillaz", "Feel Good Inc.", "Demon Days", 2005],
-      ["The Strokes", "Last Nite", "Is This It", 2001],
-      ["Kendrick Lamar", "HUMBLE.", "DAMN.", 2017],
-      ["Beyonce", "Halo", "I Am... Sasha Fierce", 2008],
+      ["Radiohead", "Paranoid Android", "OK Computer", 1997, [0.9, 0.2, 0.3, 0, 0.7, 0.4, 0.3, 0.62]],
+      ["Radiohead", "Karma Police", "OK Computer", 1997, [0.8, 0.1, 0.4, 0, 0.4, 0.7, 0.6, 0.62]],
+      ["Radiohead", "Creep", "Pablo Honey", 1993, [0.9, 0, 0.4, 0, 0.6, 0.5, 0.4, 0.55]],
+      ["Radiohead", "No Surprises", "OK Computer", 1997, [0.7, 0.1, 0.5, 0, 0.2, 0.9, 0.7, 0.62]],
+      ["Daft Punk", "One More Time", "Discovery", 2001, [0.1, 1, 0.7, 0.2, 0.9, 0.2, 0, 0.68]],
+      ["Daft Punk", "Get Lucky", "Random Access Memories", 2013, [0.2, 0.9, 0.8, 0.3, 0.7, 0.4, 0.2, 0.88]],
+      ["Daft Punk", "Harder Better Faster Stronger", "Discovery", 2001, [0.1, 1, 0.6, 0.3, 0.9, 0.1, 0, 0.68]],
+      ["Nirvana", "Smells Like Teen Spirit", "Nevermind", 1991, [1, 0, 0.3, 0, 1, 0.1, 0.2, 0.52]],
+      ["Nirvana", "Come As You Are", "Nevermind", 1991, [0.9, 0, 0.3, 0, 0.6, 0.4, 0.3, 0.52]],
+      ["The Beatles", "Come Together", "Abbey Road", 1969, [0.8, 0, 0.6, 0.1, 0.5, 0.5, 0.5, 0.15]],
+      ["The Beatles", "Here Comes the Sun", "Abbey Road", 1969, [0.5, 0, 0.7, 0, 0.3, 0.9, 0.9, 0.15]],
+      ["Pink Floyd", "Money", "The Dark Side of the Moon", 1973, [0.9, 0.1, 0.3, 0, 0.6, 0.4, 0.4, 0.22]],
+      ["Pink Floyd", "Time", "The Dark Side of the Moon", 1973, [0.9, 0.2, 0.3, 0, 0.5, 0.6, 0.4, 0.22]],
+      ["Queen", "Bohemian Rhapsody", "A Night at the Opera", 1975, [0.9, 0.1, 0.6, 0, 0.7, 0.5, 0.5, 0.25]],
+      ["Queen", "Don't Stop Me Now", "Jazz", 1978, [0.8, 0.1, 0.8, 0, 0.9, 0.2, 0.3, 0.3]],
+      ["Led Zeppelin", "Stairway to Heaven", "Led Zeppelin IV", 1971, [1, 0, 0.3, 0, 0.6, 0.6, 0.7, 0.18]],
+      ["Fleetwood Mac", "Dreams", "Rumours", 1977, [0.6, 0.1, 0.7, 0, 0.4, 0.8, 0.6, 0.28]],
+      ["Fleetwood Mac", "Go Your Own Way", "Rumours", 1977, [0.8, 0, 0.7, 0, 0.7, 0.3, 0.5, 0.28]],
+      ["Michael Jackson", "Billie Jean", "Thriller", 1982, [0.2, 0.4, 0.9, 0.5, 0.8, 0.3, 0.1, 0.37]],
+      ["Michael Jackson", "Beat It", "Thriller", 1982, [0.6, 0.3, 0.8, 0.4, 0.9, 0.2, 0.1, 0.37]],
+      ["Prince", "Purple Rain", "Purple Rain", 1984, [0.7, 0.2, 0.7, 0.2, 0.5, 0.7, 0.5, 0.4]],
+      ["David Bowie", "Heroes", "Heroes", 1977, [0.8, 0.3, 0.5, 0, 0.6, 0.5, 0.3, 0.28]],
+      ["The Rolling Stones", "Paint It Black", "Aftermath", 1966, [0.9, 0, 0.4, 0, 0.8, 0.3, 0.5, 0.1]],
+      ["Amy Winehouse", "Rehab", "Back to Black", 2006, [0.2, 0.1, 0.7, 0.5, 0.6, 0.5, 0.6, 0.77]],
+      ["Arctic Monkeys", "Do I Wanna Know?", "AM", 2013, [0.9, 0.2, 0.4, 0.1, 0.6, 0.5, 0.3, 0.88]],
+      ["Tame Impala", "The Less I Know the Better", "Currents", 2015, [0.5, 0.7, 0.7, 0.2, 0.6, 0.6, 0.2, 0.92]],
+      ["Gorillaz", "Feel Good Inc.", "Demon Days", 2005, [0.4, 0.7, 0.6, 0.7, 0.7, 0.4, 0.2, 0.75]],
+      ["The Strokes", "Last Nite", "Is This It", 2001, [0.9, 0.1, 0.5, 0, 0.7, 0.3, 0.3, 0.68]],
+      ["Kendrick Lamar", "HUMBLE.", "DAMN.", 2017, [0.1, 0.5, 0.4, 1, 0.8, 0.2, 0, 0.95]],
+      ["Beyonce", "Halo", "I Am... Sasha Fierce", 2008, [0.1, 0.3, 0.9, 0.4, 0.6, 0.7, 0.3, 0.8]],
     ];
-    const MUSIC_ITEMS = MUSIC_RAW.map(([Artist, SongTitle, Album, Year]) => ({
+    const MUSIC_ITEMS = MUSIC_RAW.map(([Artist, SongTitle, Album, Year, Emb]) => ({
       Artist: { S: Artist }, SongTitle: { S: SongTitle }, Album: { S: Album }, Year: { N: String(Year) },
+      emb: { L: Emb.map((n) => ({ N: String(n) })) },
     }));
     function seedMusic() {
       call(P + "CreateTable", MUSIC_TABLE);
@@ -395,6 +457,11 @@
       }},
       Scan: { target: P + "Scan", body: { TableName: "Music", Limit: 5 } },
       DescribeTable: { target: P + "DescribeTable", body: { TableName: "Music" } },
+      SearchVectors: { target: P + "SearchVectors", body: {
+        TableName: "Music", IndexName: "vidx",
+        SearchVector: [0.9, 0.2, 0.3, 0, 0.7, 0.4, 0.3, 0.62].map((n) => ({ N: String(n) })),
+        TopK: 5,
+      }},
       ListTables: { target: P + "ListTables", body: {} },
       CreateTable: { target: P + "CreateTable", body: MUSIC_TABLE },
       DeleteItem: { target: P + "DeleteItem", body: {
@@ -413,8 +480,9 @@
       "Item", "Key", "ExpressionAttributeValues", "ExpressionAttributeNames",
       "AttributeDefinitions", "KeySchema", "ProvisionedThroughput",
       "ExclusiveStartKey", "GlobalSecondaryIndexes", "LocalSecondaryIndexes",
+      "VectorIndexes", "SearchVector",
     ]);
-    const NUMBER_FLAGS = new Set(["Limit"]);
+    const NUMBER_FLAGS = new Set(["Limit", "TopK"]);
     function tokenize(line) {
       // Support bash-style line continuations (backslash-newline) so multi-line
       // sample commands parse; newlines are otherwise whitespace anyway.
@@ -504,6 +572,7 @@
     const CLI_READ = [
       ["query", "aws dynamodb query \\\n  --table-name Music \\\n  --key-condition-expression \"Artist = :a\" \\\n  --expression-attribute-values '{\":a\":{\"S\":\"Radiohead\"}}'"],
       ["scan", "aws dynamodb scan \\\n  --table-name Music \\\n  --limit 5"],
+      ["search-vectors", "aws dynamodb search-vectors \\\n  --table-name Music \\\n  --index-name vidx \\\n  --search-vector '[{\"N\":\"0.9\"},{\"N\":\"0.2\"},{\"N\":\"0.3\"},{\"N\":\"0\"},{\"N\":\"0.7\"},{\"N\":\"0.4\"},{\"N\":\"0.3\"},{\"N\":\"0.62\"}]' \\\n  --top-k 5"],
     ];
     function renderCliSamples(el, pairs) {
       for (const [label, cmd] of pairs) {
@@ -542,12 +611,13 @@
 
     // ---- mode tabs ------------------------------------------------------
     function setMode(mode) {
-      const modes = ["cli", "sdk", "raw", "dyn"];
+      const modes = ["cli", "sdk", "raw", "vec", "dyn"];
       if (!modes.includes(mode)) mode = "cli";
       for (const m of modes) {
         document.getElementById("panel-" + m).hidden = (m !== mode);
         document.querySelector('[data-mode="' + m + '"]').classList.toggle("active", m === mode);
       }
+      if (mode === "vec") refreshVecSelectors();
     }
     for (const tab of document.querySelectorAll("#tabs .tab")) {
       tab.onclick = () => setMode(tab.getAttribute("data-mode"));
@@ -688,6 +758,11 @@ return out.Items;`;
       if ("SS" in av) return av.SS.join(", ");
       if ("NS" in av) return av.NS.join(", ");
       if ("B" in av || "BS" in av) return "<binary>";
+      // Long numeric lists are almost certainly vectors: show a truncated
+      // preview plus the dimension count, never a wall of floats.
+      if ("L" in av && av.L.length > 4 && av.L.every((e) => e && typeof e === "object" && "N" in e)) {
+        return "[" + av.L.slice(0, 3).map((e) => e.N).join(", ") + ", \u2026] (" + av.L.length + "d)";
+      }
       return JSON.stringify(av.L ?? av.M ?? av);
     }
     function currentTables() {
@@ -707,7 +782,9 @@ return out.Items;`;
       const sel = document.getElementById("tbl-select");
       const grid = document.getElementById("grid");
       const countEl = document.getElementById("tbl-count");
+      const vecPill = document.getElementById("tbl-vector");
       grid.textContent = "";
+      vecPill.hidden = true; vecPill.textContent = "";
       const tname = sel.value;
       if (!tname) { countEl.textContent = "no tables"; return; }
       const scan = call(P + "Scan", { TableName: tname });
@@ -716,6 +793,12 @@ return out.Items;`;
       const d = call(P + "DescribeTable", { TableName: tname });
       if (d.response && d.response.Table && d.response.Table.KeySchema) {
         for (const k of d.response.Table.KeySchema) { keyAttrs.push(k.AttributeName); keyType[k.AttributeName] = k.KeyType; }
+      }
+      const vixs = (d.response && d.response.Table && d.response.Table.VectorIndexes) || [];
+      if (vixs.length) {
+        vecPill.hidden = false;
+        vecPill.textContent = "vector: " + vixs.map((v) =>
+          `${v.IndexName} \u00b7 ${v.DistanceFunction} \u00b7 ${v.Dimensions}d`).join(", ");
       }
       const cols = [...keyAttrs];
       for (const it of items) for (const k of Object.keys(it)) if (!cols.includes(k)) cols.push(k);
@@ -739,6 +822,153 @@ return out.Items;`;
       countEl.textContent = items.length > CAP
         ? `showing ${CAP} of ${items.length} items`
         : items.length + (items.length === 1 ? " item" : " items");
+    }
+
+    // ---- Vectors tab ------------------------------------------------------
+    // First-class SearchVectors flow: create a vector-indexed table from a
+    // form, pick a table/index (populated from DescribeTable), query with an
+    // existing item's embedding or a typed JSON array, and render ranked
+    // results with scores. Every dispatch also lands in the shared log.
+    const vecTableEl = document.getElementById("vec-table");
+    const vecIndexEl = document.getElementById("vec-index");
+    const vecItemEl = document.getElementById("vec-item");
+    const vecQueryEl = document.getElementById("vec-query");
+    const vecKEl = document.getElementById("vec-k");
+    let vecIndexMeta = []; // VectorIndexes of the currently selected table
+
+    function vecDispatch(op, body) {
+      const t0 = performance.now();
+      let status, response;
+      try { const r = call(P + op, body); status = r.statusCode; response = r.response; }
+      catch (e) { status = 500; response = { error: String(e) }; }
+      const ms = (performance.now() - t0).toFixed(2);
+      makeEntry({ op, status, ms, request: JSON.stringify(body, null, 2), response: JSON.stringify(response, null, 2) });
+      return { status, response };
+    }
+    function vecInputError(op, msg) {
+      makeEntry({ op, status: 400, request: null, response: "input error: " + msg, error: true });
+    }
+    function describeTableSafe(tname) {
+      const d = call(P + "DescribeTable", { TableName: tname });
+      return (d.statusCode === 200 && d.response && d.response.Table) || null;
+    }
+
+    function vecCreateTable() {
+      const tname = document.getElementById("vec-new-table").value.trim();
+      const iname = document.getElementById("vec-new-index").value.trim();
+      const attr = document.getElementById("vec-new-attr").value.trim();
+      const dims = Number(document.getElementById("vec-new-dims").value.trim());
+      const metric = document.getElementById("vec-new-metric").value;
+      if (!tname || !iname || !attr) { vecInputError("CreateTable", "table name, index name, and vector attribute are required"); return; }
+      if (!Number.isInteger(dims) || dims < 1) { vecInputError("CreateTable", "dimensions must be a positive integer"); return; }
+      const body = {
+        TableName: tname,
+        KeySchema: [{ AttributeName: "pk", KeyType: "HASH" }],
+        AttributeDefinitions: [{ AttributeName: "pk", AttributeType: "S" }],
+        BillingMode: "PAY_PER_REQUEST",
+        VectorIndexes: [{
+          IndexName: iname, Dimensions: dims, DistanceFunction: metric,
+          VectorAttribute: { AttributeName: attr }, Projection: { ProjectionType: "ALL" },
+        }],
+      };
+      const { status } = vecDispatch("CreateTable", body);
+      if (status === 200) { refreshBrowser(); refreshVecSelectors(tname); }
+    }
+
+    function refreshVecSelectors(preferTable) {
+      const prev = preferTable || vecTableEl.value;
+      vecTableEl.textContent = "";
+      const withVectors = [];
+      for (const t of currentTables()) {
+        const tbl = describeTableSafe(t);
+        if (tbl && tbl.VectorIndexes && tbl.VectorIndexes.length) withVectors.push(t);
+      }
+      for (const t of withVectors) {
+        const o = document.createElement("option"); o.value = t; o.textContent = t; vecTableEl.appendChild(o);
+      }
+      if (withVectors.includes(prev)) vecTableEl.value = prev;
+      onVecTableChange();
+    }
+    function onVecTableChange() {
+      vecIndexEl.textContent = "";
+      const tbl = vecTableEl.value ? describeTableSafe(vecTableEl.value) : null;
+      vecIndexMeta = (tbl && tbl.VectorIndexes) || [];
+      for (const v of vecIndexMeta) {
+        const o = document.createElement("option");
+        o.value = v.IndexName;
+        o.textContent = `${v.IndexName} \u00b7 ${v.DistanceFunction} \u00b7 ${v.Dimensions}d`;
+        vecIndexEl.appendChild(o);
+      }
+      populateVecItems(tbl);
+    }
+    function currentVecIndex() {
+      return vecIndexMeta.find((v) => v.IndexName === vecIndexEl.value) || null;
+    }
+    function populateVecItems(tbl) {
+      vecItemEl.textContent = "";
+      const ph = document.createElement("option");
+      ph.value = ""; ph.textContent = "(type a vector below)";
+      vecItemEl.appendChild(ph);
+      const ix = currentVecIndex();
+      if (!tbl || !ix) return;
+      const attr = ix.VectorAttribute.AttributeName;
+      const keyAttrs = (tbl.KeySchema || []).map((k) => k.AttributeName);
+      const scan = call(P + "Scan", { TableName: tbl.TableName, Limit: 100 });
+      const items = (scan.response && scan.response.Items) || [];
+      for (const it of items) {
+        const av = it[attr];
+        if (!av || !av.L || !av.L.every((e) => e && "N" in e)) continue; // unindexed item
+        const o = document.createElement("option");
+        o.value = "[" + av.L.map((e) => e.N).join(", ") + "]";
+        o.textContent = keyAttrs.map((k) => fmtAV(it[k])).join(" \u00b7 ") || "(item)";
+        vecItemEl.appendChild(o);
+      }
+    }
+
+    function renderVecResults(results) {
+      const tbl = document.getElementById("vec-results");
+      tbl.textContent = "";
+      if (!results.length) return;
+      const cols = [];
+      for (const r of results) for (const k of Object.keys(r.Item || {})) if (!cols.includes(k)) cols.push(k);
+      const thead = document.createElement("thead");
+      const htr = document.createElement("tr");
+      for (const c of ["#", "Score", ...cols]) {
+        const th = document.createElement("th"); th.textContent = c; htr.appendChild(th);
+      }
+      thead.appendChild(htr); tbl.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      results.forEach((r, i) => {
+        const tr = document.createElement("tr");
+        tr.setAttribute("data-testid", "vec-result-row");
+        const rank = document.createElement("td"); rank.textContent = String(i + 1); tr.appendChild(rank);
+        const score = document.createElement("td");
+        score.textContent = Number(r.Score).toFixed(4); score.title = String(r.Score);
+        tr.appendChild(score);
+        for (const c of cols) { const td = document.createElement("td"); td.textContent = fmtAV((r.Item || {})[c]); tr.appendChild(td); }
+        tbody.appendChild(tr);
+      });
+      tbl.appendChild(tbody);
+    }
+
+    function vecRun() {
+      const tname = vecTableEl.value;
+      const iname = vecIndexEl.value;
+      if (!tname || !iname) { vecInputError("SearchVectors", "create a table with a vector index first (no vector-indexed table selected)"); return; }
+      let nums;
+      try { nums = JSON.parse(vecQueryEl.value); } catch (e) { vecInputError("SearchVectors", "query vector is not valid JSON: " + e.message); return; }
+      if (!Array.isArray(nums) || !nums.length || !nums.every((n) => typeof n === "number" && Number.isFinite(n))) {
+        vecInputError("SearchVectors", "query vector must be a non-empty JSON array of numbers"); return;
+      }
+      const k = Number(vecKEl.value.trim() || "5");
+      if (!Number.isInteger(k) || k < 1) { vecInputError("SearchVectors", "TopK must be a positive integer"); return; }
+      const body = {
+        TableName: tname, IndexName: iname,
+        SearchVector: nums.map((n) => ({ N: String(n) })),
+        TopK: k,
+      };
+      const { status, response } = vecDispatch("SearchVectors", body);
+      renderVecResults(status === 200 ? (response.SearchResults || []) : []);
     }
 
     // ---- Shareable link -------------------------------------------------
@@ -778,9 +1008,16 @@ return out.Items;`;
       const n = seedMusic();
       logNote(`Engine reset (fresh in-memory database), re-seeded Music with ${n} items.`);
       refreshBrowser();
+      refreshVecSelectors();
     };
     document.getElementById("tbl-select").onchange = renderGrid;
     document.getElementById("tbl-refresh").onclick = refreshBrowser;
+    document.getElementById("vec-create").onclick = vecCreateTable;
+    document.getElementById("vec-run").onclick = vecRun;
+    document.getElementById("vec-refresh").onclick = () => refreshVecSelectors();
+    vecTableEl.onchange = onVecTableChange;
+    vecIndexEl.onchange = () => populateVecItems(vecTableEl.value ? describeTableSafe(vecTableEl.value) : null);
+    vecItemEl.onchange = () => { if (vecItemEl.value) vecQueryEl.value = vecItemEl.value; };
 
     try {
       await initWasm();
@@ -791,7 +1028,7 @@ return out.Items;`;
       setMode("cli");
       refreshBrowser();
       loadSample("Query");
-      logNote(`Seeded ${n} tracks into Music so you're never staring at an empty database. It all runs in this tab: no server, and no network after the initial load.`);
+      logNote(`Seeded ${n} tracks into Music so you're never staring at an empty database. Each track carries an 8-d feature embedding behind a COSINE vector index (vidx): try the Vectors tab. It all runs in this tab: no server, and no network after the initial load.`);
       restoreFromHash();
       document.body.setAttribute("data-ready", "true");
     } catch (e) {
