@@ -1,10 +1,11 @@
-// Headless-browser test for the Workbench's Vectors subsection (vector index
-// + SearchVectors).
+// Headless-browser test for the Vector Workbench's Vectors subsection (vector
+// index + SearchVectors).
 //
 // Serves crates/wasm/web/ and drives it in a real headless Chromium: the
 // seeded Quotes table carries a COSINE vector index over 384-d embeddings, the
 // Vectors subsection is form-driven with a shared table/index context bar and
-// collapsible sections (create / put with text / search) whose open state
+// collapsible sections (create / put with text / search) that all start
+// closed on first visit and whose open state
 // persists across reloads, the old pick-an-item query dropdown is gone, grid
 // vectors render as truncating chips with expand/copy, a fresh vector-indexed
 // table is created from the form, items are inserted through the CLI shell,
@@ -150,8 +151,11 @@ async function main() {
   assert((await fullBox.count()) === 0, "chip expand did not collapse again");
   console.log("  [2] grid renders emb as a truncating chip with working expand/collapse");
 
-  // 3) Workbench: context bar selects Quotes/vidx; the item picker is GONE;
-  //    search the seeded index through the advanced raw-vector input.
+  // 3) Vector Workbench: context bar selects Quotes/vidx; the item picker is
+  //    GONE; all sections start closed; search the seeded index through the
+  //    advanced raw-vector input.
+  const tabLabel = await page.locator('[data-testid="tab-vec"]').innerText();
+  assert(tabLabel.trim() === "Vector Workbench", "tool tab not renamed: " + tabLabel);
   await page.locator('[data-testid="tab-vec"]').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="vec-table"] option').length >= 1, { timeout: 10000 });
   assert((await page.locator('[data-testid="vec-item"]').count()) === 0,
@@ -161,11 +165,13 @@ async function main() {
   const idxLabel = await page.locator('[data-testid="vec-index"] option:checked').innerText();
   assert(idxLabel.includes("vidx") && idxLabel.includes("COSINE") && idxLabel.includes("384d"),
     "index picker label wrong: " + idxLabel);
-  // default section states: search open, create/put/advanced-raw closed.
-  assert(await page.locator('[data-testid="vec-sec-search"]').evaluate((d) => d.open), "search section should default open");
-  assert(!(await page.locator('[data-testid="vec-sec-create"]').evaluate((d) => d.open)), "create section should default closed");
-  assert(!(await page.locator('[data-testid="vec-sec-put"]').evaluate((d) => d.open)), "put section should default closed");
-  assert(!(await page.locator('[data-testid="vec-sec-raw"]').evaluate((d) => d.open)), "raw input should default closed");
+  // default section states: ALL closed on first visit (search included).
+  for (const sec of ["vec-sec-search", "vec-sec-create", "vec-sec-put", "vec-sec-raw"]) {
+    assert(!(await page.locator(`[data-testid="${sec}"]`).evaluate((d) => d.open)),
+      sec + " should default closed on first visit");
+  }
+  await page.locator('[data-testid="vec-sec-search"] > summary').click();
+  assert(await page.locator('[data-testid="vec-sec-search"]').evaluate((d) => d.open), "search section did not open");
   await page.locator('[data-testid="vec-sec-raw"] > summary').click();
   await page.locator('[data-testid="vec-query"]').fill(JSON.stringify(probe.emb));
   await page.locator('[data-testid="vec-k"]').fill("5");
@@ -189,13 +195,21 @@ async function main() {
   const label = await page.locator('[data-testid="vec-results-label"]').innerText();
   assert(label.includes("raw vector") && label.includes("Quotes/vidx"),
     "results label does not name the raw-vector input: " + label);
-  console.log("  [3] raw-vector search: item picker gone, 5 ranked results, ascending scores, self-match first, labeled '" + label + "'");
+  console.log("  [3] raw-vector search: all sections default closed, tab renamed, item picker gone, 5 ranked results, ascending scores, self-match first, labeled '" + label + "'");
 
   // 4) Full UI flow on a fresh table: create (collapsed form section) ->
   //    insert (CLI) -> search (raw vector) -> ranked results.
   await page.locator('[data-testid="tab-vec"]').click();
   await page.locator('[data-testid="vec-sec-create"] > summary').click();
   assert(await page.locator('[data-testid="vec-sec-create"]').evaluate((d) => d.open), "create section did not open");
+  // Dimensions defaults to the pinned model dimension, with a visible note.
+  assert((await page.locator('[data-testid="vec-new-dims"]').inputValue()) === "384",
+    "Dimensions should default to the pinned model dimension 384");
+  const dimsNote = page.locator('[data-testid="vec-new-dims-note"]');
+  assert(await dimsNote.isVisible(), "dimension field note should be visible");
+  const dimsNoteText = await dimsNote.innerText();
+  assert(dimsNoteText.includes("all-MiniLM-L6-v2") && dimsNoteText.includes("raw vectors"),
+    "dimension field note wrong: " + dimsNoteText);
   await page.locator('[data-testid="vec-new-table"]').fill("Colors");
   await page.locator('[data-testid="vec-new-index"]').fill("cidx");
   await page.locator('[data-testid="vec-new-attr"]').fill("rgb");
@@ -211,7 +225,7 @@ async function main() {
     const s = document.querySelector('[data-testid="vec-table"]');
     return s && [...s.options].some((o) => o.value === "Colors");
   }, { timeout: 10000 });
-  console.log("  [4] created table Colors with vector index cidx (EUCLIDEAN, 3d) from the form");
+  console.log("  [4] dims default 384 with visible model note; created table Colors with vector index cidx (EUCLIDEAN, 3d) from the form");
 
   // insert three colors through the CLI shell
   for (const [name, r, g, b] of [["red", 1, 0, 0], ["yellow", 1, 1, 0], ["blue", 0, 0, 1]]) {
@@ -273,7 +287,7 @@ async function main() {
   console.log("  [9] zero network after ready: the whole vector flow ran in-tab");
 
   // 8) Section open/closed state persists across a reload (localStorage):
-  //    create + advanced-raw were opened above, put stayed closed.
+  //    search + create + advanced-raw were opened above, put stayed closed.
   readyReached = false; // the reload's own fetches are expected
   await page.reload({ waitUntil: "load" });
   await page.waitForFunction(() => document.body.getAttribute("data-ready") === "true", { timeout: 30000 });
@@ -282,11 +296,11 @@ async function main() {
     const open = await page.locator(`[data-testid="${sec}"]`).evaluate((d) => d.open);
     assert(open === want, `${sec} open state not persisted across reload: got ${open}, want ${want}`);
   }
-  console.log("  [10] section open/closed state persisted across reload (create/raw open, put closed, search open)");
+  console.log("  [10] section open/closed state persisted across reload (search/create/raw open, put closed)");
 
   await browser.close();
   await new Promise((r) => server.close(r));
-  console.log("VECTOR TEST PASSED: collapsible sections + persistence, item picker removed, vector chips, create -> insert -> search -> labeled ranked results, raw/CLI parity, zero network");
+  console.log("VECTOR TEST PASSED: all-closed default + persistence, tab renamed, item picker removed, dims default + note, vector chips, create -> insert -> search -> labeled ranked results, raw/CLI parity, zero network");
 }
 
 main().catch((e) => fail(String(e && e.stack ? e.stack : e)));

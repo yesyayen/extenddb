@@ -1,7 +1,7 @@
 // Headless-browser test for the ExtendDB browser playground (U1 demo shell).
 //
 // Serves crates/wasm/web/ and drives it in a real headless Chromium: the engine
-// boots (body[data-ready]), the page is pre-seeded (funny note, 30 books), the
+// boots (body[data-ready]), the page is pre-seeded (seed note, 30 books), the
 // boxed timestamped log renders ops, a non-2xx reads as an error entry, Reset
 // re-seeds, the browser observes ZERO network after ready, and the engine wasm
 // module is fetched exactly once at load.
@@ -86,12 +86,17 @@ async function main() {
   console.log("  [1] engine ready (body[data-ready])");
   readyReached = true;
 
-  // 2) Pre-seeded, never blank: the funny boot note reports the 30-book seed.
+  // 2) Pre-seeded, never blank: the boot note reports both seed tables with
+  //    a concrete query idea each.
   await page.waitForFunction(
-    () => document.querySelector('[data-testid="log"]').innerText.includes("Seeded 30 books"),
+    () => {
+      const t = document.querySelector('[data-testid="log"]').innerText;
+      return t.includes("Seeded two tables") && t.includes("Books: 30 items") &&
+        t.includes("Quotes: 120 one-liners") && t.includes("Try Vector Workbench");
+    },
     { timeout: 10000 }
   );
-  console.log("  [2] pre-seeded: boot note reports 'Seeded 30 books'");
+  console.log("  [2] pre-seeded: boot note reports both tables ('Seeded two tables', Books + Quotes bullets)");
 
   // 3) Run the pre-loaded Query in the Raw JSON console -> a boxed 200 entry.
   await page.locator('[data-testid="tab-raw"]').click();
@@ -155,7 +160,7 @@ async function main() {
 
   await browser.close();
   await new Promise((r) => server.close(r));
-  console.log("UI TEST PASSED: demo shell boots, pre-seeds 30 books, boxed timestamped log, error entry + reset, zero network");
+  console.log("UI TEST PASSED: demo shell boots, pre-seeds two tables, boxed timestamped log, error entry + reset, zero network");
 }
 
 main().catch((e) => fail(String(e && e.stack ? e.stack : e)));
