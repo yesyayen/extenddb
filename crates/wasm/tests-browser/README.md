@@ -7,7 +7,7 @@ load, wasm boot in a browser, DOM interaction, and browser-level network
 observation.
 
 The page uses **mode tabs** in two labeled groups (Clients: CLI / JS SDK / Raw
-JSON; Tools: Workbench): exactly one console is
+JSON; Tools: Vector Workbench): exactly one console is
 visible at a time, so specs click the relevant `tab-*` before driving a panel.
 The **log** is a scrollable column of boxed, millisecond-timestamped entries on
 the left (each entry has `data-testid="log-entry"`; error entries carry `.err`;
@@ -21,16 +21,20 @@ textarea with grouped, bash-formatted sample commands.
 - `sdk.spec.mjs` (U3): the in-page real `@aws-sdk/client-dynamodb` console.
 - `browser.spec.mjs` (U4): the data browser (table selector + live item grid).
 - `share.spec.mjs` (U5): the shareable link (encode command in URL, restore + auto-run).
-- `vector.spec.mjs`: the Workbench's Vectors subsection (collapsible sections
-  with persisted open state, shared context bar, create a vector-indexed table
-  from the form, insert via CLI, SearchVectors with a raw JSON vector, ranked
+- `vector.spec.mjs`: the Vector Workbench's Vectors subsection (collapsible
+  sections, all closed by default with persisted open state, shared context
+  bar, create a vector-indexed table from the form (Dimensions defaults to the
+  pinned model dimension with a visible field note), insert via CLI,
+  SearchVectors with a raw JSON vector, ranked
   results with a source label, data-browser pill + vector chips,
   raw JSON + CLI `search-vectors` parity, zero network).
 - `embed.spec.mjs`: the text -> vector semantic-search flow (seeded `Quotes`
   table with real 384-d sentence embeddings, in-tab lazy model load with a
   visible status pill, typed query text returning semantically sensible
   ranked results, a build-time vs in-browser embedding determinism check,
-  add-item-with-text, the embed -> wire vector JSON helper pasted into the
+  add-item-with-text with optional attribute rows (S/N/BOOL auto-detect)
+  round-tripping into the data browser and SearchVectors results, the
+  embed -> wire vector JSON helper pasted into the
   CLI, model/dimension pinning with the raw flow kept for other indexes,
   arbitrary-dimension CLI `create-table`, and zero non-same-origin requests).
   Needs `web/vendor` + `web/models` + `web/data/quotes-seed.json` (see
@@ -40,8 +44,8 @@ textarea with grouped, bash-formatted sample commands.
 ## What `ui.spec.mjs` asserts
 
 1. The WebAssembly engine boots (`body[data-ready="true"]`).
-2. The page is **pre-seeded** (never a blank prompt): the funny boot note reports
-   `Seeded 30 books`.
+2. The page is **pre-seeded** (never a blank prompt): the boot note reports
+   `Seeded two tables` with a Books and a Quotes bullet.
 3. Running the pre-loaded `Query` in the Raw JSON console renders a boxed `200`
    entry with the seeded Le Guin books.
 4. A non-2xx response (`DescribeTable` after `DeleteTable`) renders as an

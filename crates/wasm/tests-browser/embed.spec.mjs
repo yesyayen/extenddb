@@ -2,13 +2,15 @@
 //
 // Serves crates/wasm/web/ and drives it in a real headless Chromium: the
 // seeded Quotes table carries real 384-d sentence embeddings (precomputed at
-// build time by tools/embed-seed.mjs), the Vectors tab embeds typed query
+// build time by tools/embed-seed.mjs), the Vector Workbench embeds typed query
 // text in-tab with the vendored model (lazy same-origin load, visible
 // status), fills the query-vector field, and returns semantically sensible
 // ranked results; the in-browser embedding of a seed sentence matches the
 // checked-in build-time embedding within float tolerance (seed/query model
 // drift guard); "add item with text" embeds and PutItems from its collapsible
-// section; the embed -> wire vector JSON helper logs a collapsed dispatch-style
+// section, and optional attribute rows (auto-detected S/N/BOOL) round-trip
+// into the stored item (data browser + SearchVectors results); the embed ->
+// wire vector JSON helper logs a collapsed dispatch-style
 // entry whose JSON pastes straight into the CLI shell; the text flow is
 // pinned to the model's dimensions with a visible disable reason (other
 // indexes keep the raw flow); CLI create-table still accepts arbitrary
@@ -123,7 +125,7 @@ async function main() {
   await page.waitForFunction(() => document.body.getAttribute("data-ready") === "true", { timeout: 30000 });
   readyReached = true;
   const bootNote = await page.locator('[data-testid="log"]').innerText();
-  assert(bootNote.includes(`${seed.items.length} one-liners into Quotes`),
+  assert(bootNote.includes(`Quotes: ${seed.items.length} one-liners`),
     "boot note does not report the Quotes seed: " + bootNote.slice(0, 300));
   console.log(`  [0] engine ready; boot note reports ${seed.items.length} seeded Quotes`);
 
@@ -150,6 +152,9 @@ async function main() {
     '"VectorAttribute":{"AttributeName":"emb"},"Projection":{"ProjectionType":"ALL"}}]\'');
   await page.locator('[data-testid="tab-vec"]').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="vec-table"] option').length >= 2, { timeout: 10000 });
+  // Sections all start closed; open VectorSearch for the rest of the test.
+  await page.locator('[data-testid="vec-sec-search"] > summary').click();
+  assert(await page.locator('[data-testid="vec-sec-search"]').evaluate((d) => d.open), "search section did not open");
   const modelPill = await page.locator('[data-testid="vec-model-pill"]').innerText();
   assert(modelPill.includes("Xenova/all-MiniLM-L6-v2") && modelPill.includes("384d"),
     "model pill wrong: " + modelPill);
@@ -238,6 +243,74 @@ async function main() {
     "added item should self-match first with ~0 score: " + rows[0].join(" | "));
   console.log("  [5] add-item-with-text: mine-01 inserted and self-matches (score " + rows[0][1] + ")");
 
+  // 5b) Optional attribute rows: add/remove controls, S/N/BOOL auto-detect,
+  //     and full round-trip into the stored item, visible in the data browser
+  //     and in SearchVectors results. A fresh 384-d table keeps the grid small.
+  const notesCreate = await cli(page,
+    'aws dynamodb create-table --table-name Notes ' +
+    '--attribute-definitions \'[{"AttributeName":"pk","AttributeType":"S"}]\' ' +
+    '--key-schema \'[{"AttributeName":"pk","KeyType":"HASH"}]\' --billing-mode PAY_PER_REQUEST ' +
+    '--vector-indexes \'[{"IndexName":"nidx","Dimensions":384,"DistanceFunction":"COSINE",' +
+    '"VectorAttribute":{"AttributeName":"emb"},"Projection":{"ProjectionType":"ALL"}}]\'');
+  assert(notesCreate.text.includes("200") && !notesCreate.cls.includes("err"),
+    "create-table Notes failed: " + notesCreate.text.slice(0, 300));
+  await page.locator('[data-testid="tab-vec"]').click();
+  await page.waitForFunction(() => {
+    const s = document.querySelector('[data-testid="vec-table"]');
+    return s && [...s.options].some((o) => o.value === "Notes");
+  }, { timeout: 10000 });
+  await page.locator('[data-testid="vec-table"]').selectOption("Notes");
+  await page.waitForFunction(() => !document.querySelector('[data-testid="vec-add-run"]').disabled, { timeout: 10000 });
+  const attrAdd = page.locator('[data-testid="vec-attr-add"]');
+  for (let i = 0; i < 4; i++) await attrAdd.click();
+  const attrRows = page.locator('[data-testid="vec-attr-row"]');
+  assert((await attrRows.count()) === 4, "expected 4 attribute rows after 4 adds");
+  const fillRow = async (i, n, v) => {
+    await attrRows.nth(i).locator('[data-testid="vec-attr-name"]').fill(n);
+    await attrRows.nth(i).locator('[data-testid="vec-attr-value"]').fill(v);
+  };
+  await fillRow(0, "topic", "debugging");   // -> S
+  await fillRow(1, "year", "2026");         // -> N
+  await fillRow(2, "pinned", "true");       // -> BOOL
+  await fillRow(3, "scratch", "drop-me");   // removed before submit
+  await attrRows.nth(3).locator('[data-testid="vec-attr-remove"]').click();
+  assert((await attrRows.count()) === 3, "Remove did not delete the attribute row");
+  const noteText = "Optional attributes ride along with the embedding.";
+  await page.locator('[data-testid="vec-add-pk"]').fill("note-01");
+  await page.locator('[data-testid="vec-add-text"]').fill(noteText);
+  before = await entryCount(page);
+  await page.locator('[data-testid="vec-add-run"]').click();
+  await waitNewEntry(page, before);
+  entry = await newestEntry(page);
+  assert(entry.text.includes("PutItem") && entry.text.includes("200") && !entry.cls.includes("err"),
+    "attribute PutItem failed: " + entry.text.slice(0, 300));
+  for (const frag of ['"topic"', '"S": "debugging"', '"year"', '"N": "2026"', '"pinned"', '"BOOL": true']) {
+    assert(entry.text.includes(frag), "PutItem request missing " + frag + ": " + entry.text.slice(0, 400));
+  }
+  assert(!entry.text.includes("scratch"), "removed attribute row leaked into the PutItem");
+  // data browser round-trip
+  await page.locator('[data-testid="tbl-select"]').selectOption("Notes");
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="grid"]').innerText.includes("note-01"), { timeout: 10000 });
+  const notesGrid = await page.locator('[data-testid="grid"]').innerText();
+  for (const v of ["topic", "debugging", "year", "2026", "pinned", "true"]) {
+    assert(notesGrid.includes(v), "data browser missing attribute " + v + ": " + notesGrid.slice(0, 400));
+  }
+  assert(!notesGrid.includes("scratch"), "removed attribute appears in the data browser");
+  // SearchVectors round-trip (self-match carries the attributes)
+  await page.locator('[data-testid="vec-text"]').fill(noteText);
+  before = await entryCount(page);
+  await page.locator('[data-testid="vec-embed-run"]').click();
+  await waitNewEntry(page, before);
+  rows = await resultRows(page);
+  const flatNote = rows[0].join(" ");
+  assert(flatNote.includes("note-01") && Number(rows[0][1]) < 1e-3,
+    "note-01 should self-match first: " + flatNote);
+  for (const v of ["debugging", "2026", "true"]) {
+    assert(flatNote.includes(v), "SearchVectors result missing attribute value " + v + ": " + flatNote);
+  }
+  console.log("  [5b] optional attributes (S/N/BOOL auto-detect, row removal) round-trip into the grid and SearchVectors results");
+
   // 6) Embed -> wire vector JSON helper: a dispatch-style log entry, one-line
   //    header (chars, dims, ms), the vector JSON collapsed by default behind
   //    the standard expand control; expanded, it pastes into the CLI.
@@ -289,7 +362,7 @@ async function main() {
 
   await browser.close();
   await new Promise((r) => server.close(r));
-  console.log("EMBED TEST PASSED: text -> embed -> semantic results, determinism, add-with-text section, collapsed CLI paste helper, visible dimension pinning, same-origin only");
+  console.log("EMBED TEST PASSED: text -> embed -> semantic results, determinism, add-with-text section, optional attribute round-trip, collapsed CLI paste helper, visible dimension pinning, same-origin only");
 }
 
 main().catch((e) => fail(String(e && e.stack ? e.stack : e)));
