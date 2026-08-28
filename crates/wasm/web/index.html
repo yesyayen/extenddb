@@ -90,14 +90,48 @@
     .samples button { font-size: 12.5px; padding: 5px 10px; }
 
     select { background: var(--input-bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; font-size: 13.5px; }
-    #vec-model-pill { text-transform: none; letter-spacing: normal; color: var(--accent); }
+    #vec-model-pill { text-transform: none; letter-spacing: normal; color: var(--accent); font-size: 12px; }
 
-    /* Vectors tab */
+    /* Vectors subsection (form-driven mode) */
+    .subsection { margin-top: 12px; }
+    .sub-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .sub-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .vec-context { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-top: 2px; }
+    .vec-context > div { flex: 1; min-width: 150px; }
+    .vec-context select { width: 100%; }
+    .vec-context button { height: 34px; white-space: nowrap; }
+    details.vec-sec { border: 1px solid var(--border); border-radius: 8px; background: var(--card); margin-top: 10px; }
+    details.vec-sec > summary { cursor: pointer; padding: 9px 12px; font-size: 13.5px; font-weight: 600; user-select: none; }
+    details.vec-sec > summary:hover { background: var(--panel); border-radius: 8px; }
+    details.vec-sec[open] > summary { border-bottom: 1px solid var(--border); }
+    details.vec-sec > .sec-body { padding: 2px 12px 12px; }
+    details.vec-sec details.vec-sec { background: var(--panel); margin-top: 12px; }
+    .sum-hint { color: var(--muted); font-weight: 400; font-size: 12.5px; }
+    .why { font-size: 12.5px; color: var(--muted); align-self: center; }
+
+    /* vector chips: truncated preview + expand/copy, never a wall of floats */
+    .vec-chip-wrap { display: inline-block; max-width: 100%; }
+    .vec-chip {
+      display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px;
+      border: 1px solid var(--border); border-radius: 999px; background: var(--panel);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--fg);
+    }
+    .vec-chip button { padding: 0 5px; font-size: 10.5px; border: none; background: transparent; color: var(--accent); cursor: pointer; }
+    .vec-chip button:hover { background: transparent; text-decoration: underline; }
+    .vec-full {
+      margin-top: 6px; width: 320px; max-width: 100%; height: 110px; overflow: auto; resize: none;
+      border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; background: var(--code-bg);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+      white-space: pre-wrap; word-break: break-all;
+    }
+    #vec-last-query { margin-top: 10px; font-size: 12.5px; color: var(--muted); }
+    .results-label { margin-top: 12px; font-size: 12.5px; color: var(--muted); }
+
     .vec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
     .vec-grid .wide { grid-column: 1 / -1; }
     .vec-grid select { width: 100%; }
     #vec-query { height: 64px; }
-    #vec-results-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 6px; margin-top: 12px; max-height: 260px; }
+    #vec-results-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 6px; margin-top: 6px; max-height: 260px; }
     #vec-results-wrap:not(:has(tr)) { display: none; }
     table#vec-results { border-collapse: collapse; width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
     #vec-results th, #vec-results td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; white-space: nowrap; }
@@ -207,57 +241,87 @@
       </div>
 
       <div class="panel" id="panel-vec" data-testid="panel-vec" hidden>
-        <label class="samples-label">Create a table with a vector index (hash key <code>pk</code>, type S)</label>
-        <div class="vec-grid">
-          <div><label for="vec-new-table">Table name</label><input id="vec-new-table" data-testid="vec-new-table" spellcheck="false" value="Vectors" /></div>
-          <div><label for="vec-new-index">Index name</label><input id="vec-new-index" data-testid="vec-new-index" spellcheck="false" value="vidx" /></div>
-          <div><label for="vec-new-attr">Vector attribute</label><input id="vec-new-attr" data-testid="vec-new-attr" spellcheck="false" value="emb" /></div>
-          <div><label for="vec-new-dims">Dimensions</label><input id="vec-new-dims" data-testid="vec-new-dims" spellcheck="false" value="8" /></div>
-          <div class="wide"><label for="vec-new-metric">Distance metric</label>
-            <select id="vec-new-metric" data-testid="vec-new-metric">
-              <option value="COSINE">COSINE</option>
-              <option value="EUCLIDEAN">EUCLIDEAN</option>
-              <option value="DOT_PRODUCT">DOT_PRODUCT</option>
-            </select>
+        <!-- Form-driven mode. One subsection today (Vectors); future subsections
+             are additive siblings of .subsection, and the mode tab gets renamed
+             (e.g. Workbench) when a second one lands. -->
+        <div class="subsection" data-testid="sub-vectors">
+          <div class="sub-head">
+            <label class="samples-label" style="margin:0">Vectors</label>
+            <span id="vec-model-pill" data-testid="vec-model-pill"></span>
           </div>
-        </div>
-        <div class="row">
-          <button id="vec-create" data-testid="vec-create" class="primary">Create table</button>
-        </div>
 
-        <label class="samples-label">Search vectors: exact nearest-neighbor scan (lower score = closer, except DOT_PRODUCT)</label>
-        <div class="vec-grid">
-          <div><label for="vec-table">Table</label><select id="vec-table" data-testid="vec-table"></select></div>
-          <div><label for="vec-index">Vector index</label><select id="vec-index" data-testid="vec-index"></select></div>
-          <div><label for="vec-item">Query: pick an item&hellip;</label><select id="vec-item" data-testid="vec-item"></select></div>
-          <div><label for="vec-k">TopK</label><input id="vec-k" data-testid="vec-k" spellcheck="false" value="5" /></div>
-          <div class="wide"><label for="vec-query">&hellip;or type a query vector (JSON array of numbers)</label>
-            <textarea id="vec-query" data-testid="vec-query" spellcheck="false" placeholder="[0.9, 0.2, 0.3, 0, 0.7, 0.4, 0.3, 0.62]"></textarea></div>
-        </div>
-        <div class="row">
-          <button id="vec-run" data-testid="vec-run" class="primary">Search &#9654;</button>
-          <button id="vec-refresh" data-testid="vec-refresh">Refresh tables</button>
-        </div>
+          <!-- shared context: picked once, used by every section below -->
+          <div class="vec-context" data-testid="vec-context">
+            <div><label for="vec-table">Table</label><select id="vec-table" data-testid="vec-table"></select></div>
+            <div><label for="vec-index">Vector index</label><select id="vec-index" data-testid="vec-index"></select></div>
+            <button id="vec-refresh" data-testid="vec-refresh" title="Reload the table and index lists">&#8635; Refresh</button>
+          </div>
 
-        <label class="samples-label">Semantic search: type text, embed in this tab, search (<span id="vec-model-pill" data-testid="vec-model-pill"></span>)</label>
-        <div class="vec-grid">
-          <div class="wide"><label for="vec-text">Query text</label>
-            <input id="vec-text" data-testid="vec-text" spellcheck="false" placeholder="telescopes and distant galaxies" /></div>
-        </div>
-        <div class="row">
-          <button id="vec-embed-run" data-testid="vec-embed-run" class="primary">Embed &amp; search</button>
-          <button id="vec-embed-copy" data-testid="vec-embed-copy" title="Embed the query text and log the wire-format vector JSON for aws dynamodb search-vectors / put-item">Embed &rarr; vector JSON</button>
-          <span id="embed-status" class="pill" data-testid="embed-status" hidden></span>
-        </div>
-        <div id="vec-results-wrap"><table id="vec-results" data-testid="vec-results"></table></div>
+          <details class="vec-sec" data-sec="create" data-testid="vec-sec-create">
+            <summary>Create table with vector index <span class="sum-hint">&middot; hash key <code>pk</code> (S), on-demand billing</span></summary>
+            <div class="sec-body">
+              <div class="vec-grid">
+                <div><label for="vec-new-table">Table name</label><input id="vec-new-table" data-testid="vec-new-table" spellcheck="false" value="Vectors" /></div>
+                <div><label for="vec-new-index">Index name</label><input id="vec-new-index" data-testid="vec-new-index" spellcheck="false" value="vidx" /></div>
+                <div><label for="vec-new-attr">Vector attribute</label><input id="vec-new-attr" data-testid="vec-new-attr" spellcheck="false" value="emb" /></div>
+                <div><label for="vec-new-dims">Dimensions</label><input id="vec-new-dims" data-testid="vec-new-dims" spellcheck="false" value="8" /></div>
+                <div class="wide"><label for="vec-new-metric">Distance metric</label>
+                  <select id="vec-new-metric" data-testid="vec-new-metric">
+                    <option value="COSINE">COSINE</option>
+                    <option value="EUCLIDEAN">EUCLIDEAN</option>
+                    <option value="DOT_PRODUCT">DOT_PRODUCT</option>
+                  </select>
+                </div>
+              </div>
+              <div class="row">
+                <button id="vec-create" data-testid="vec-create" class="primary">Create table</button>
+              </div>
+            </div>
+          </details>
 
-        <label class="samples-label">Add an item with text: embed, then put-item with the vector attribute</label>
-        <div class="vec-grid">
-          <div><label for="vec-add-pk">Partition key</label><input id="vec-add-pk" data-testid="vec-add-pk" spellcheck="false" placeholder="my-quote-01" /></div>
-          <div><label for="vec-add-text">Text</label><input id="vec-add-text" data-testid="vec-add-text" spellcheck="false" placeholder="A short sentence to index" /></div>
-        </div>
-        <div class="row">
-          <button id="vec-add-run" data-testid="vec-add-run">Embed &amp; put item</button>
+          <details class="vec-sec" data-sec="put" data-testid="vec-sec-put">
+            <summary>Put / update item with text <span class="sum-hint">&middot; embeds in this tab, then PutItem; the same key overwrites</span></summary>
+            <div class="sec-body">
+              <div class="vec-grid">
+                <div><label for="vec-add-pk">Partition key</label><input id="vec-add-pk" data-testid="vec-add-pk" spellcheck="false" placeholder="my-quote-01" /></div>
+                <div><label for="vec-add-text">Text</label><input id="vec-add-text" data-testid="vec-add-text" spellcheck="false" placeholder="A short sentence to index" /></div>
+              </div>
+              <div class="row">
+                <button id="vec-add-run" data-testid="vec-add-run">Embed &amp; put item</button>
+                <span id="vec-add-why" class="why" data-testid="vec-add-why" hidden></span>
+              </div>
+            </div>
+          </details>
+
+          <details class="vec-sec" data-sec="search" data-testid="vec-sec-search" open>
+            <summary>VectorSearch <span class="sum-hint">&middot; exact nearest neighbor; lower score = closer, except DOT_PRODUCT</span></summary>
+            <div class="sec-body">
+              <div class="vec-grid">
+                <div class="wide"><label for="vec-text">Query text</label>
+                  <input id="vec-text" data-testid="vec-text" spellcheck="false" placeholder="telescopes and distant galaxies" /></div>
+                <div><label for="vec-k">TopK</label><input id="vec-k" data-testid="vec-k" spellcheck="false" value="5" /></div>
+              </div>
+              <div class="row">
+                <button id="vec-embed-run" data-testid="vec-embed-run" class="primary">Embed &amp; search</button>
+                <button id="vec-embed-copy" data-testid="vec-embed-copy" title="Embed the query text and log the wire-format vector JSON for aws dynamodb search-vectors / put-item">Embed &rarr; vector JSON</button>
+                <span id="embed-status" class="pill" data-testid="embed-status" hidden></span>
+              </div>
+              <div class="row"><span id="vec-embed-why" class="why" data-testid="vec-embed-why" hidden></span></div>
+              <div id="vec-last-query" data-testid="vec-last-query" hidden></div>
+              <details class="vec-sec" data-sec="search-raw" data-testid="vec-sec-raw">
+                <summary>Advanced: paste a raw JSON vector <span class="sum-hint">&middot; works for any index dimensions</span></summary>
+                <div class="sec-body">
+                  <label for="vec-query">Query vector (JSON array of numbers)</label>
+                  <textarea id="vec-query" data-testid="vec-query" spellcheck="false" placeholder="[0.9, 0.2, 0.3, 0, 0.7, 0.4, 0.3, 0.62]"></textarea>
+                  <div class="row">
+                    <button id="vec-run" data-testid="vec-run">Search raw vector &#9654;</button>
+                  </div>
+                </div>
+              </details>
+              <div id="vec-results-label" class="results-label" data-testid="vec-results-label" hidden></div>
+              <div id="vec-results-wrap"><table id="vec-results" data-testid="vec-results"></table></div>
+            </div>
+          </details>
         </div>
       </div>
 
@@ -342,14 +406,28 @@
       box.append(pre);
       return box;
     }
-    function appendBody(entry, kind, text) {
+    function appendBody(entry, kind, text, collapsed) {
       if (text == null) return;
       const box = bodyBox(kind, text);
       entry.append(box);
-      if (text.split("\n").length > 8) {
+      // Two collapse styles, one expand control: long bodies clamp to ~5 lines;
+      // bodies marked collapsed (e.g. embed-helper vector JSON) start fully
+      // hidden behind the same button.
+      if (collapsed) {
+        box.hidden = true;
+        const btn = document.createElement("button");
+        btn.className = "log-expand"; btn.textContent = "show more";
+        btn.setAttribute("data-testid", "log-expand");
+        btn.onclick = () => {
+          box.hidden = !box.hidden;
+          btn.textContent = box.hidden ? "show more" : "show less";
+        };
+        entry.append(btn);
+      } else if (text.split("\n").length > 8) {
         box.classList.add("clamp");
         const btn = document.createElement("button");
         btn.className = "log-expand"; btn.textContent = "show more";
+        btn.setAttribute("data-testid", "log-expand");
         btn.onclick = () => {
           const clamped = box.classList.toggle("clamp");
           btn.textContent = clamped ? "show more" : "show less";
@@ -357,7 +435,7 @@
         entry.append(btn);
       }
     }
-    function makeEntry({ op, status, ms, request, response, error }) {
+    function makeEntry({ op, status, ms, request, response, error, collapseResponse }) {
       clearEmpty();
       const isErr = !!error || (typeof status === "number" && status >= 400);
       const entry = document.createElement("div");
@@ -374,7 +452,7 @@
       if (ms != null) { const dur = document.createElement("span"); dur.className = "log-dur"; dur.textContent = ms + " ms"; head.append(dur); }
       entry.append(head);
       appendBody(entry, "req", request);
-      appendBody(entry, "resp", response);
+      appendBody(entry, "resp", response, collapseResponse);
       logEl.prepend(entry);
     }
     function logNote(text) {
@@ -833,9 +911,61 @@ return out.Items;`;
       // Long numeric lists are almost certainly vectors: show a truncated
       // preview plus the dimension count, never a wall of floats.
       if ("L" in av && av.L.length > 4 && av.L.every((e) => e && typeof e === "object" && "N" in e)) {
-        return "[" + av.L.slice(0, 3).map((e) => e.N).join(", ") + ", \u2026] (" + av.L.length + "d)";
+        return "[" + av.L.slice(0, 3).map((e) => e.N).join(", ") + ", \u2026] \u00b7 " + av.L.length + "d";
       }
       return JSON.stringify(av.L ?? av.M ?? av);
+    }
+    // A long numeric list attribute is treated as a vector; returns number[] or null.
+    function vectorAVNums(av) {
+      if (av && av.L && av.L.length > 4 && av.L.every((e) => e && typeof e === "object" && "N" in e)) {
+        return av.L.map((e) => Number(e.N));
+      }
+      return null;
+    }
+    // Every vector display is a chip: 3 leading dims + count, with expand
+    // (full JSON in a fixed-height scrollable box) and copy. Never inline floats.
+    function vectorChip(nums) {
+      const wrap = document.createElement("span");
+      wrap.className = "vec-chip-wrap";
+      wrap.setAttribute("data-testid", "vec-chip");
+      const json = "[" + nums.map((n) => String(n)).join(", ") + "]";
+      const chip = document.createElement("span");
+      chip.className = "vec-chip";
+      const code = document.createElement("code");
+      code.textContent = "[" + nums.slice(0, 3).map((n) => n.toFixed(3)).join(", ") + ", \u2026] \u00b7 " + nums.length + "d";
+      const expand = document.createElement("button");
+      expand.textContent = "expand"; expand.title = "show the full vector JSON";
+      expand.setAttribute("data-testid", "vec-chip-expand");
+      let full = null;
+      expand.onclick = (e) => {
+        e.preventDefault();
+        if (full) { full.remove(); full = null; expand.textContent = "expand"; return; }
+        full = document.createElement("div");
+        full.className = "vec-full";
+        full.setAttribute("data-testid", "vec-full");
+        full.textContent = json;
+        wrap.append(full);
+        expand.textContent = "collapse";
+      };
+      const copy = document.createElement("button");
+      copy.textContent = "copy"; copy.title = "copy the full vector JSON";
+      copy.onclick = (e) => {
+        e.preventDefault();
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(json).then(() => {}, () => {});
+        copy.textContent = "copied";
+        setTimeout(() => { copy.textContent = "copy"; }, 1200);
+      };
+      chip.append(code, expand, copy);
+      wrap.prepend(chip);
+      return wrap;
+    }
+    // Fills a table cell: vectors become chips, everything else plain text.
+    function renderCell(td, av) {
+      const nums = vectorAVNums(av);
+      if (nums) { td.append(vectorChip(nums)); return; }
+      const s = fmtAV(av);
+      td.textContent = s.length > 80 ? s.slice(0, 77) + "\u2026" : s;
+      if (s.length > 80) td.title = s;
     }
     function currentTables() {
       const r = call(P + "ListTables", {});
@@ -887,7 +1017,7 @@ return out.Items;`;
       const tbody = document.createElement("tbody");
       for (const it of shown) {
         const tr = document.createElement("tr");
-        for (const c of cols) { const td = document.createElement("td"); td.textContent = fmtAV(it[c]); tr.appendChild(td); }
+        for (const c of cols) { const td = document.createElement("td"); renderCell(td, it[c]); tr.appendChild(td); }
         tbody.appendChild(tr);
       }
       grid.appendChild(tbody);
@@ -897,16 +1027,31 @@ return out.Items;`;
     }
 
     // ---- Vectors tab ------------------------------------------------------
-    // First-class SearchVectors flow: create a vector-indexed table from a
-    // form, pick a table/index (populated from DescribeTable), query with an
-    // existing item's embedding or a typed JSON array, and render ranked
-    // results with scores. Every dispatch also lands in the shared log.
+    // Form-driven mode, one 'Vectors' subsection: a shared table/index context
+    // bar on top, then collapsible sections (create / put with text / search).
+    // Open state persists in localStorage. Every dispatch lands in the log.
     const vecTableEl = document.getElementById("vec-table");
     const vecIndexEl = document.getElementById("vec-index");
-    const vecItemEl = document.getElementById("vec-item");
     const vecQueryEl = document.getElementById("vec-query");
     const vecKEl = document.getElementById("vec-k");
     let vecIndexMeta = []; // VectorIndexes of the currently selected table
+
+    const VEC_SECTIONS_KEY = "extenddb-vec-sections";
+    function initVecSections() {
+      const sections = document.querySelectorAll("#panel-vec details[data-sec]");
+      let saved = {};
+      try { saved = JSON.parse(localStorage.getItem(VEC_SECTIONS_KEY) || "{}"); } catch (e) {}
+      for (const d of sections) {
+        const k = d.getAttribute("data-sec");
+        if (typeof saved[k] === "boolean") d.open = saved[k];
+        d.addEventListener("toggle", () => {
+          const cur = {};
+          for (const dd of sections) cur[dd.getAttribute("data-sec")] = dd.open;
+          try { localStorage.setItem(VEC_SECTIONS_KEY, JSON.stringify(cur)); } catch (e) {}
+        });
+      }
+    }
+    initVecSections();
 
     function vecDispatch(op, body) {
       const t0 = performance.now();
@@ -971,45 +1116,27 @@ return out.Items;`;
         o.textContent = `${v.IndexName} \u00b7 ${v.DistanceFunction} \u00b7 ${v.Dimensions}d`;
         vecIndexEl.appendChild(o);
       }
-      populateVecItems(tbl);
       updateTextFlow();
     }
     function currentVecIndex() {
       return vecIndexMeta.find((v) => v.IndexName === vecIndexEl.value) || null;
     }
-    function populateVecItems(tbl) {
-      vecItemEl.textContent = "";
-      const ph = document.createElement("option");
-      ph.value = ""; ph.textContent = "(type a vector below)";
-      vecItemEl.appendChild(ph);
-      const ix = currentVecIndex();
-      if (!tbl || !ix) return;
-      const attr = ix.VectorAttribute.AttributeName;
-      const keyAttrs = (tbl.KeySchema || []).map((k) => k.AttributeName);
-      const scan = call(P + "Scan", { TableName: tbl.TableName, Limit: 100 });
-      const items = (scan.response && scan.response.Items) || [];
-      for (const it of items) {
-        const av = it[attr];
-        if (!av || !av.L || !av.L.every((e) => e && "N" in e)) continue; // unindexed item
-        const o = document.createElement("option");
-        o.value = "[" + av.L.map((e) => e.N).join(", ") + "]";
-        o.textContent = keyAttrs.map((k) => fmtAV(it[k])).join(" \u00b7 ") || "(item)";
-        vecItemEl.appendChild(o);
-      }
-    }
 
-    function renderVecResults(results) {
-      const tbl = document.getElementById("vec-results");
-      tbl.textContent = "";
+    function renderVecResults(results, tbl) {
+      const table = document.getElementById("vec-results");
+      table.textContent = "";
       if (!results.length) return;
-      const cols = [];
+      // Key attributes first, then the rest in encounter order; vector
+      // attributes render as chips, long strings truncate to a preview.
+      const keyAttrs = ((tbl && tbl.KeySchema) || []).map((k) => k.AttributeName);
+      const cols = [...keyAttrs];
       for (const r of results) for (const k of Object.keys(r.Item || {})) if (!cols.includes(k)) cols.push(k);
       const thead = document.createElement("thead");
       const htr = document.createElement("tr");
       for (const c of ["#", "Score", ...cols]) {
         const th = document.createElement("th"); th.textContent = c; htr.appendChild(th);
       }
-      thead.appendChild(htr); tbl.appendChild(thead);
+      thead.appendChild(htr); table.appendChild(thead);
       const tbody = document.createElement("tbody");
       results.forEach((r, i) => {
         const tr = document.createElement("tr");
@@ -1018,21 +1145,22 @@ return out.Items;`;
         const score = document.createElement("td");
         score.textContent = Number(r.Score).toFixed(4); score.title = String(r.Score);
         tr.appendChild(score);
-        for (const c of cols) { const td = document.createElement("td"); td.textContent = fmtAV((r.Item || {})[c]); tr.appendChild(td); }
+        for (const c of cols) { const td = document.createElement("td"); renderCell(td, (r.Item || {})[c]); tr.appendChild(td); }
         tbody.appendChild(tr);
       });
-      tbl.appendChild(tbody);
+      table.appendChild(tbody);
     }
 
-    function vecRun() {
+    // One shared results area; the label names the input that produced it.
+    function setResultsLabel(text) {
+      const el = document.getElementById("vec-results-label");
+      el.hidden = !text;
+      el.textContent = text || "";
+    }
+    function vecSearchWith(nums, sourceLabel) {
       const tname = vecTableEl.value;
       const iname = vecIndexEl.value;
       if (!tname || !iname) { vecInputError("SearchVectors", "create a table with a vector index first (no vector-indexed table selected)"); return; }
-      let nums;
-      try { nums = JSON.parse(vecQueryEl.value); } catch (e) { vecInputError("SearchVectors", "query vector is not valid JSON: " + e.message); return; }
-      if (!Array.isArray(nums) || !nums.length || !nums.every((n) => typeof n === "number" && Number.isFinite(n))) {
-        vecInputError("SearchVectors", "query vector must be a non-empty JSON array of numbers"); return;
-      }
       const k = Number(vecKEl.value.trim() || "5");
       if (!Number.isInteger(k) || k < 1) { vecInputError("SearchVectors", "TopK must be a positive integer"); return; }
       const body = {
@@ -1041,7 +1169,17 @@ return out.Items;`;
         TopK: k,
       };
       const { status, response } = vecDispatch("SearchVectors", body);
-      renderVecResults(status === 200 ? (response.SearchResults || []) : []);
+      const results = status === 200 ? (response.SearchResults || []) : [];
+      renderVecResults(results, describeTableSafe(tname));
+      setResultsLabel(`Results from ${sourceLabel} \u00b7 ${tname}/${iname} \u00b7 ${results.length} ${results.length === 1 ? "item" : "items"}`);
+    }
+    function vecRun() {
+      let nums;
+      try { nums = JSON.parse(vecQueryEl.value); } catch (e) { vecInputError("SearchVectors", "query vector is not valid JSON: " + e.message); return; }
+      if (!Array.isArray(nums) || !nums.length || !nums.every((n) => typeof n === "number" && Number.isFinite(n))) {
+        vecInputError("SearchVectors", "query vector must be a non-empty JSON array of numbers"); return;
+      }
+      vecSearchWith(nums, `raw vector (${nums.length}d)`);
     }
 
     // ---- text -> vector (in-browser embedding) ---------------------------
@@ -1101,7 +1239,10 @@ return out.Items;`;
       const dimsOk = !!ix && ix.Dimensions === EMBED_MODEL.dimensions;
       const why = !ix
         ? "select a table with a vector index first"
-        : `index ${ix.IndexName} is ${ix.Dimensions}d; the bundled model emits ${EMBED_MODEL.dimensions}d vectors, so this index keeps the raw-vector flow`;
+        : `index ${ix.IndexName} is ${ix.Dimensions}d; the bundled model emits ${EMBED_MODEL.dimensions}d vectors. Use the raw JSON vector input instead.`;
+      const whyEl = document.getElementById("vec-embed-why");
+      whyEl.hidden = dimsOk;
+      whyEl.textContent = dimsOk ? "" : "Text input disabled: " + why;
       for (const el of [vecTextEl, embedRunBtn, embedCopyBtn]) {
         el.disabled = !dimsOk;
         el.title = dimsOk ? "" : why;
@@ -1109,29 +1250,46 @@ return out.Items;`;
       const tbl = vecTableEl.value ? describeTableSafe(vecTableEl.value) : null;
       const addOk = dimsOk && !!singleStringHashKey(tbl);
       const addWhy = !dimsOk ? why : "this table's key schema is not a single string hash key";
+      const addWhyEl = document.getElementById("vec-add-why");
+      addWhyEl.hidden = addOk;
+      addWhyEl.textContent = addOk ? "" : "Text input disabled: " + addWhy;
       for (const el of [vecAddPkEl, vecAddTextEl, vecAddRunBtn]) {
         el.disabled = !addOk;
         el.title = addOk ? "" : addWhy;
       }
+    }
+    // Shows the embedded query vector as a chip (expand/copy), never inline.
+    function showLastQueryChip(nums, text) {
+      const holder = document.getElementById("vec-last-query");
+      holder.hidden = false;
+      holder.textContent = `query vector for \u201c${text.length > 40 ? text.slice(0, 37) + "\u2026" : text}\u201d: `;
+      holder.append(vectorChip(nums));
     }
     async function vecEmbedSearch() {
       const text = vecTextEl.value.trim();
       if (!text) { vecInputError("SearchVectors", "type some query text first"); return; }
       const v = await embedWithStatus(text);
       if (!v) return;
-      // Fill the existing query-vector field and run the normal search path.
-      vecQueryEl.value = "[" + v.map((n) => String(n)).join(", ") + "]";
-      vecItemEl.value = "";
-      vecRun();
+      showLastQueryChip(v, text);
+      vecSearchWith(v, `text \u201c${text.length > 40 ? text.slice(0, 37) + "\u2026" : text}\u201d`);
     }
     async function vecEmbedCopy() {
       const text = vecTextEl.value.trim();
       if (!text) { vecInputError("EmbedText", "type some query text first"); return; }
+      const t0 = performance.now();
       const v = await embedWithStatus(text);
       if (!v) return;
+      const ms = (performance.now() - t0).toFixed(0);
       const wire = JSON.stringify(v.map((n) => ({ N: String(n) })));
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(wire).then(() => {}, () => {});
-      logNote("Wire-format vector for " + text.length + "-char query text (copied to clipboard). Paste it into aws dynamodb search-vectors --search-vector '...' or a put-item vector attribute:\n" + wire);
+      // Same shape as a dispatch entry: one-line header + the vector JSON
+      // behind the standard expand control, collapsed by default.
+      makeEntry({
+        op: "EmbedText", status: "ok", ms,
+        request: `${text.length}-char query text \u2192 ${v.length}d wire vector (copied to clipboard). Paste into aws dynamodb search-vectors --search-vector '...' or a put-item vector attribute.`,
+        response: wire,
+        collapseResponse: true,
+      });
     }
     async function vecAddItem() {
       const tname = vecTableEl.value;
@@ -1150,7 +1308,7 @@ return out.Items;`;
         [ix.VectorAttribute.AttributeName]: { L: v.map((n) => ({ N: String(n) })) },
       };
       const { status } = vecDispatch("PutItem", { TableName: tname, Item });
-      if (status === 200) { refreshBrowser(); populateVecItems(tbl); }
+      if (status === 200) refreshBrowser();
     }
 
     // ---- Shareable link -------------------------------------------------
@@ -1203,8 +1361,7 @@ return out.Items;`;
     vecAddRunBtn.onclick = vecAddItem;
     vecTextEl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); vecEmbedSearch(); } });
     vecTableEl.onchange = onVecTableChange;
-    vecIndexEl.onchange = () => { populateVecItems(vecTableEl.value ? describeTableSafe(vecTableEl.value) : null); updateTextFlow(); };
-    vecItemEl.onchange = () => { if (vecItemEl.value) vecQueryEl.value = vecItemEl.value; };
+    vecIndexEl.onchange = updateTextFlow;
 
     try {
       const seedFetch = loadQuotesSeed(); // parallel with the wasm fetch, still pre-ready
