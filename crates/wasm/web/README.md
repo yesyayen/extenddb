@@ -11,7 +11,7 @@ no server, no network.
 scripts/wasm-build.sh --target web --dev --out-dir web/pkg
 
 # vendor the text-embedding runtime + model into web/vendor + web/models
-# (powers the Workbench's semantic text search; optional, degrades gracefully)
+# (powers the Vector Workbench's semantic text search; optional, degrades gracefully)
 cd crates/wasm/tools && npm install && node vendor-embed-assets.mjs && cd -
 
 # serve this directory over http (any static server works)
@@ -20,7 +20,7 @@ cd crates/wasm/web && python3 -m http.server 8099
 ```
 
 The embedding assets degrade gracefully: without `web/vendor` + `web/models`
-the Workbench's text flow reports the model as unavailable and everything
+the Vector Workbench's text flow reports the model as unavailable and everything
 else works.
 
 The seeded `Quotes` table's 384-d sentence embeddings live in
@@ -63,10 +63,11 @@ browser:
 - **CLI** (client): an `aws dynamodb <op> --flags` shell (parsed in JS to the wire call).
 - **JS SDK** (client): the real `@aws-sdk/client-dynamodb` over the requestHandler shim.
 - **Raw JSON** (client): hand-write `X-Amz-Target` + body.
-- **Workbench** (tool): collapsible form-driven sections, today one `Vectors`
-  subsection: a shared table/index context bar, create a table with a vector
-  index (index name, dimensions, distance metric), put/update an item from
-  plain text (embedded in-tab), and `SearchVectors` with query text (primary)
+- **Vector Workbench** (tool): collapsible form-driven sections, today one
+  `Vectors` subsection: a shared table/index context bar, create a table with
+  a vector index (index name, dimensions, distance metric), put/update an item
+  from plain text (embedded in-tab) with optional flat attributes, and
+  `SearchVectors` with query text (primary)
   or a raw JSON vector (advanced). Results render as a ranked table with
   scores. The seeded `Quotes` table carries a COSINE index (`vidx`) over real
   384-d sentence embeddings, so semantic search works out of the box. The

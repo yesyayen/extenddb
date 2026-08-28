@@ -113,6 +113,10 @@
     details.vec-sec details.vec-sec { background: var(--panel); margin-top: 12px; }
     .sum-hint { color: var(--muted); font-weight: 400; font-size: 12.5px; }
     .why { font-size: 12.5px; color: var(--muted); align-self: center; }
+    .field-note { font-size: 11.5px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+    .attr-row { display: flex; gap: 8px; margin-top: 6px; align-items: center; }
+    .attr-row input { flex: 1; }
+    .attr-row button { white-space: nowrap; }
 
     /* vector chips: truncated preview + expand/copy, never a wall of floats */
     .vec-chip-wrap { display: inline-block; max-width: 100%; }
@@ -183,7 +187,7 @@
 <body>
   <header>
     <div>
-      <h1>ExtendDB &mdash; real DynamoDB, running entirely in your browser</h1>
+      <h1>ExtendDB: real DynamoDB, running entirely in your browser</h1>
       <p>The real ExtendDB engine compiled to WebAssembly over a SQLite backend. Every request runs in this tab: <code>no server, no network after the initial load</code>.</p>
     </div>
     <button id="theme-toggle" data-testid="theme-toggle">&#127769; Dark</button>
@@ -208,7 +212,7 @@
         <button class="tab" data-mode="raw" data-testid="tab-raw">Raw JSON</button>
         <span class="tab-divider"></span>
         <span class="tab-group-label">Tools</span>
-        <button class="tab" data-mode="vec" data-testid="tab-vec">Workbench</button>
+        <button class="tab" data-mode="vec" data-testid="tab-vec">Vector Workbench</button>
       </div>
 
       <div class="panel" id="panel-cli" data-testid="panel-cli">
@@ -218,7 +222,7 @@
         <div class="row samples" id="cli-samples-item"></div>
         <label class="samples-label">Data plane &middot; read (query / scan)</label>
         <div class="row samples" id="cli-samples-read"></div>
-        <label for="cli">Command (edit freely, then Run &mdash; Ctrl/&#8984;+Enter)</label>
+        <label for="cli">Command. Edit, then Run (Ctrl/Cmd+Enter)</label>
         <textarea id="cli" data-testid="cli" spellcheck="false"
           placeholder="aws dynamodb query \&#10;  --table-name Books \&#10;  --key-condition-expression &quot;Author = :a&quot; \&#10;  --expression-attribute-values '{&quot;:a&quot;:{&quot;S&quot;:&quot;Ursula K. Le Guin&quot;}}'"></textarea>
         <div class="row">
@@ -228,7 +232,7 @@
       </div>
 
       <div class="panel" id="panel-sdk" data-testid="panel-sdk" hidden>
-        <label for="sdk">SDK console &mdash; real <code>@aws-sdk/client-dynamodb</code>, runs in-tab (edit freely, then Run &mdash; Ctrl/&#8984;+Enter)</label>
+        <label for="sdk">SDK console: <code>@aws-sdk/client-dynamodb</code>. Edit, then Run (Ctrl/Cmd+Enter)</label>
         <textarea id="sdk" data-testid="sdk" spellcheck="false"></textarea>
         <div class="row">
           <button id="sdk-run" data-testid="sdk-run" class="primary">Run</button>
@@ -240,7 +244,7 @@
         <div class="row samples" id="sample-buttons"></div>
         <label for="target">Operation (X-Amz-Target)</label>
         <input id="target" spellcheck="false" value="DynamoDB_20120810.Query" />
-        <label for="body">Request JSON (edit freely, then Run &mdash; Ctrl/&#8984;+Enter)</label>
+        <label for="body">Request JSON. Edit, then Run (Ctrl/Cmd+Enter)</label>
         <textarea id="body" spellcheck="false"></textarea>
         <div class="row">
           <button id="run" class="primary" data-testid="run">Run</button>
@@ -248,9 +252,8 @@
       </div>
 
       <div class="panel" id="panel-vec" data-testid="panel-vec" hidden>
-        <!-- Form-driven mode. One subsection today (Vectors); future subsections
-             are additive siblings of .subsection, and the mode tab gets renamed
-             (e.g. Workbench) when a second one lands. -->
+        <!-- Form-driven mode (Vector Workbench). One subsection today (Vectors);
+             future subsections are additive siblings of .subsection. -->
         <div class="subsection" data-testid="sub-vectors">
           <div class="sub-head">
             <label class="samples-label" style="margin:0">Vectors</label>
@@ -271,7 +274,8 @@
                 <div><label for="vec-new-table">Table name</label><input id="vec-new-table" data-testid="vec-new-table" spellcheck="false" value="Vectors" /></div>
                 <div><label for="vec-new-index">Index name</label><input id="vec-new-index" data-testid="vec-new-index" spellcheck="false" value="vidx" /></div>
                 <div><label for="vec-new-attr">Vector attribute</label><input id="vec-new-attr" data-testid="vec-new-attr" spellcheck="false" value="emb" /></div>
-                <div><label for="vec-new-dims">Dimensions</label><input id="vec-new-dims" data-testid="vec-new-dims" spellcheck="false" value="8" /></div>
+                <div><label for="vec-new-dims">Dimensions</label><input id="vec-new-dims" data-testid="vec-new-dims" spellcheck="false" value="384" />
+                  <div class="field-note" data-testid="vec-new-dims-note">384 matches the bundled embedding model (all-MiniLM-L6-v2); other values work with raw vectors only</div></div>
                 <div class="wide"><label for="vec-new-metric">Distance metric</label>
                   <select id="vec-new-metric" data-testid="vec-new-metric">
                     <option value="COSINE">COSINE</option>
@@ -287,20 +291,23 @@
           </details>
 
           <details class="vec-sec" data-sec="put" data-testid="vec-sec-put">
-            <summary>Put / update item with text <span class="sum-hint">&middot; embeds in this tab, then PutItem; the same key overwrites</span></summary>
+            <summary>Put / update item with text <span class="sum-hint">&middot; embeds the text, then PutItem; the same key overwrites</span></summary>
             <div class="sec-body">
               <div class="vec-grid">
                 <div><label for="vec-add-pk">Partition key</label><input id="vec-add-pk" data-testid="vec-add-pk" spellcheck="false" placeholder="my-quote-01" /></div>
                 <div><label for="vec-add-text">Text</label><input id="vec-add-text" data-testid="vec-add-text" spellcheck="false" placeholder="A short sentence to index" /></div>
               </div>
+              <label>Optional attributes</label>
+              <div id="vec-add-attrs" data-testid="vec-add-attrs"></div>
               <div class="row">
+                <button id="vec-attr-add" data-testid="vec-attr-add">Add attribute</button>
                 <button id="vec-add-run" data-testid="vec-add-run">Embed &amp; put item</button>
                 <span id="vec-add-why" class="why" data-testid="vec-add-why" hidden></span>
               </div>
             </div>
           </details>
 
-          <details class="vec-sec" data-sec="search" data-testid="vec-sec-search" open>
+          <details class="vec-sec" data-sec="search" data-testid="vec-sec-search">
             <summary>VectorSearch <span class="sum-hint">&middot; exact nearest neighbor; lower score = closer, except DOT_PRODUCT</span></summary>
             <div class="sec-body">
               <div class="vec-grid">
@@ -946,9 +953,10 @@ return out.Items;`;
         : items.length + (items.length === 1 ? " item" : " items");
     }
 
-    // ---- Vectors tab ------------------------------------------------------
+    // ---- Vector Workbench tab ---------------------------------------------
     // Form-driven mode, one 'Vectors' subsection: a shared table/index context
-    // bar on top, then collapsible sections (create / put with text / search).
+    // bar on top, then collapsible sections (create / put with text / search),
+    // all closed on first visit.
     // Open state persists in localStorage. Every dispatch lands in the log.
     const vecTableEl = document.getElementById("vec-table");
     const vecIndexEl = document.getElementById("vec-index");
@@ -1115,8 +1123,10 @@ return out.Items;`;
     const embedRunBtn = document.getElementById("vec-embed-run");
     const embedCopyBtn = document.getElementById("vec-embed-copy");
     const vecAddRunBtn = document.getElementById("vec-add-run");
+    const vecAttrsEl = document.getElementById("vec-add-attrs");
+    const vecAttrAddBtn = document.getElementById("vec-attr-add");
     document.getElementById("vec-model-pill").textContent =
-      `${EMBED_MODEL.id} \u00b7 ${EMBED_MODEL.dimensions}d \u00b7 runs in this tab`;
+      `${EMBED_MODEL.id} \u00b7 ${EMBED_MODEL.dimensions}d`;
 
     function embedProgress(p) {
       if (!p || !p.status) return;
@@ -1173,10 +1183,50 @@ return out.Items;`;
       const addWhyEl = document.getElementById("vec-add-why");
       addWhyEl.hidden = addOk;
       addWhyEl.textContent = addOk ? "" : "Text input disabled: " + addWhy;
-      for (const el of [vecAddPkEl, vecAddTextEl, vecAddRunBtn]) {
+      const attrEls = [...vecAttrsEl.querySelectorAll("input, button")];
+      for (const el of [vecAddPkEl, vecAddTextEl, vecAddRunBtn, vecAttrAddBtn, ...attrEls]) {
         el.disabled = !addOk;
         el.title = addOk ? "" : addWhy;
       }
+    }
+    // Optional attributes on Put/Update Item: repeatable name + value rows
+    // with add/remove. Values auto-detect their wire type: a numeric string
+    // becomes N, true/false becomes BOOL, everything else stays S. Flat types
+    // only; no nesting, no JSON editing.
+    function addAttrRow() {
+      const row = document.createElement("div");
+      row.className = "attr-row";
+      row.setAttribute("data-testid", "vec-attr-row");
+      const name = document.createElement("input");
+      name.placeholder = "topic"; name.spellcheck = false;
+      name.setAttribute("data-testid", "vec-attr-name");
+      const value = document.createElement("input");
+      value.placeholder = "astronomy"; value.spellcheck = false;
+      value.setAttribute("data-testid", "vec-attr-value");
+      const rm = document.createElement("button");
+      rm.textContent = "Remove"; rm.title = "remove this attribute row";
+      rm.setAttribute("data-testid", "vec-attr-remove");
+      rm.onclick = () => row.remove();
+      row.append(name, value, rm);
+      vecAttrsEl.append(row);
+      name.focus();
+    }
+    vecAttrAddBtn.onclick = addAttrRow;
+    function detectAttrValue(raw) {
+      const s = raw.trim();
+      if (s === "true" || s === "false") return { BOOL: s === "true" };
+      if (s !== "" && Number.isFinite(Number(s))) return { N: s };
+      return { S: s };
+    }
+    function collectAttrRows() {
+      const out = {};
+      for (const row of vecAttrsEl.querySelectorAll(".attr-row")) {
+        const [name, value] = row.querySelectorAll("input");
+        const n = name.value.trim();
+        if (!n) continue;
+        out[n] = detectAttrValue(value.value);
+      }
+      return out;
     }
     // Shows the embedded query vector as a chip (expand/copy), never inline.
     function showLastQueryChip(nums, text) {
@@ -1223,6 +1273,7 @@ return out.Items;`;
       const v = await embedWithStatus(text);
       if (!v) return;
       const Item = {
+        ...collectAttrRows(),
         [keyName]: { S: pk },
         text: { S: text },
         [ix.VectorAttribute.AttributeName]: { L: v.map((n) => ({ N: String(n) })) },
@@ -1295,7 +1346,11 @@ return out.Items;`;
       setMode("cli");
       refreshBrowser();
       loadSample("Query");
-      logNote(`Seeded ${n} books into Books and ${nq} one-liners into Quotes (real ${EMBED_MODEL.dimensions}-d sentence embeddings from ${EMBED_MODEL.id}) so you're never staring at an empty database. Try the Workbench tab: type a query like \u201ctelescopes and distant galaxies\u201d and search Quotes semantically. It all runs in this tab: no server, and no network after the initial load (the embedding model itself loads lazily, same-origin, on first use).`);
+      logNote(
+        "Seeded two tables:\n" +
+        `- Books: ${n} items, plain table. Try a Query by key in the CLI, or browse it in the data browser.\n` +
+        `- Quotes: ${nq} one-liners with a vector index (vidx \u00b7 COSINE \u00b7 ${EMBED_MODEL.dimensions}d, real MiniLM sentence embeddings). Try Vector Workbench: search \u201ctelescopes and distant galaxies\u201d.\n` +
+        "The embedding model loads once, on first use.");
       restoreFromHash();
       document.body.setAttribute("data-ready", "true");
     } catch (e) {

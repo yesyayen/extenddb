@@ -3,7 +3,7 @@
 // One place pins the model, its dimensions, and the loader configuration.
 // Three consumers share it so seed vectors, in-page query vectors, and test
 // vectors all come from the same model and the same runtime:
-//   - index.html (the Vectors tab text flow)
+//   - index.html (the Vector Workbench text flow)
 //   - tools/embed-seed.mjs (build-time seed embeddings, via headless Chromium)
 //   - tests-browser/embed.spec.mjs (the determinism check)
 //
@@ -11,7 +11,7 @@
 // (web/vendor/transformers + web/models), populated by
 // tools/vendor-embed-assets.mjs. There is no CDN fetch at runtime.
 
-// The single pinned model. The Vectors tab enables the text flow only for
+// The single pinned model. The Vector Workbench enables the text flow only for
 // vector indexes whose dimension matches EMBED_MODEL.dimensions, so seed and
 // query vectors can never come from different models.
 export const EMBED_MODEL = {

@@ -10,9 +10,9 @@ pattern here in the same commit.
   - **Clients**: surfaces that speak the wire protocol the way a customer
     would (CLI, JS SDK, Raw JSON). A client tab never invents flags or
     operations that Amazon DynamoDB does not have.
-  - **Tools**: form-driven surfaces (Workbench). A tool composes real wire
-    calls behind forms.
-- The Workbench holds subsections (today: Vectors). A subsection is a
+  - **Tools**: form-driven surfaces (Vector Workbench). A tool composes real
+    wire calls behind forms.
+- The Vector Workbench holds subsections (today: Vectors). A subsection is a
   `.subsection` container. New subsections are additive siblings.
 - Each subsection: a shared context bar on top (pickers used by every
   section), then collapsible sections.
@@ -25,8 +25,8 @@ pattern here in the same commit.
   (`.sum-hint`, muted, middot-separated). The hint is the only place for
   explanation text; the open view holds forms, not documentation.
 - Open state persists in localStorage, keyed by `data-sec`.
-- Default state: the primary section of a subsection is open, the rest
-  are closed.
+- Default state: every section starts closed on first visit. Only the
+  user opens sections; the opened state persists.
 
 ## Buttons
 
@@ -54,6 +54,17 @@ pattern here in the same commit.
   colon.
 - Pills (`.pill`) are read-only status or identity (model pill, embed
   status, item count, index summary). A pill is never clickable.
+- Field notes (`.field-note`): one small muted line directly under an
+  input, only when a default needs explanation. Never a paragraph.
+
+## Repeatable rows
+
+- Optional flat attributes use repeatable name + value rows
+  (`.attr-row`) with an `Add attribute` button and a per-row `Remove`.
+- Value types auto-detect: a numeric string becomes `N`, `true`/`false`
+  becomes `BOOL`, everything else stays `S`. No nested types, no JSON
+  editor.
+- Rows with an empty name are skipped on submit.
 
 ## Vectors and long values
 
@@ -74,6 +85,12 @@ pattern here in the same commit.
   control.
 - `logNote` is only for engine lifecycle notes (seed, reset, failures),
   never for operation output.
+
+## Global messaging
+
+- The in-tab promise (runs in this tab, no server, no network after the
+  initial load) is stated exactly once, in the page header subtitle.
+  Tab headers, seed notes, and pills do not repeat it.
 
 ## Terminology
 
