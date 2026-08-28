@@ -84,34 +84,34 @@ async function main() {
   await page.locator('[data-testid="tab-cli"]').click(); // CLI is default, be explicit
   console.log("  [0] engine ready, CLI tab active, page pre-seeded");
 
-  // 1) list-tables: kebab op -> ListTables, Music present, wire call reflected.
+  // 1) list-tables: kebab op -> ListTables, Books present, wire call reflected.
   let log = await cli(page, "aws dynamodb list-tables");
   assert(log.includes("ListTables"), "list-tables op not in log");
-  assert(log.includes("Music"), "list-tables missing Music");
+  assert(log.includes("Books"), "list-tables missing Books");
   assert((await page.inputValue("#target")) === "DynamoDB_20120810.ListTables",
     "list-tables did not reflect the wire target");
-  console.log("  [1] list-tables -> ListTables, Music present, wire call reflected");
+  console.log("  [1] list-tables -> ListTables, Books present, wire call reflected");
 
   // 2) query with a quoted key-condition + JSON expression-attribute-values.
   log = await cli(page,
-    'aws dynamodb query --table-name Music --key-condition-expression "Artist = :a" --expression-attribute-values \'{":a":{"S":"Radiohead"}}\'');
-  assert(log.includes("Paranoid Android") && log.includes("Karma Police"),
-    "query via CLI missing seeded Radiohead items");
+    'aws dynamodb query --table-name Books --key-condition-expression "Author = :a" --expression-attribute-values \'{":a":{"S":"Ursula K. Le Guin"}}\'');
+  assert(log.includes("A Wizard of Earthsea") && log.includes("The Left Hand of Darkness"),
+    "query via CLI missing seeded Le Guin books");
   const qBody = JSON.parse(await page.inputValue("#body"));
-  assert(qBody.KeyConditionExpression === "Artist = :a", "query KeyConditionExpression wrong");
-  assert(qBody.ExpressionAttributeValues[":a"].S === "Radiohead", "query EAV not parsed as JSON");
+  assert(qBody.KeyConditionExpression === "Author = :a", "query KeyConditionExpression wrong");
+  assert(qBody.ExpressionAttributeValues[":a"].S === "Ursula K. Le Guin", "query EAV not parsed as JSON");
   console.log("  [2] query --flags parsed (quoted expr + JSON EAV), seeded items returned");
 
   // 3) put-item then get-item round-trips a CLI-written item.
   await cli(page,
-    'aws dynamodb put-item --table-name Music --item \'{"Artist":{"S":"Muse"},"SongTitle":{"S":"Hysteria"},"Year":{"N":"2003"}}\'');
+    'aws dynamodb put-item --table-name Books --item \'{"Author":{"S":"Frank Herbert"},"Title":{"S":"Dune Messiah"},"Year":{"N":"1969"}}\'');
   log = await cli(page,
-    'aws dynamodb get-item --table-name Music --key \'{"Artist":{"S":"Muse"},"SongTitle":{"S":"Hysteria"}}\'');
-  assert(log.includes("Hysteria") && log.includes("2003"), "get-item did not return the CLI-written item");
+    'aws dynamodb get-item --table-name Books --key \'{"Author":{"S":"Frank Herbert"},"Title":{"S":"Dune Messiah"}}\'');
+  assert(log.includes("Dune Messiah") && log.includes("1969"), "get-item did not return the CLI-written item");
   console.log("  [3] put-item then get-item round-trips a CLI-written item");
 
   // 4) scan --limit 2 : numeric flag coercion.
-  log = await cli(page, "aws dynamodb scan --table-name Music --limit 2");
+  log = await cli(page, "aws dynamodb scan --table-name Books --limit 2");
   const sBody = JSON.parse(await page.inputValue("#body"));
   assert(sBody.Limit === 2 && typeof sBody.Limit === "number", "scan --limit not coerced to number");
   assert(/"Count":\s*2/.test(log), "scan --limit 2 did not cap Count");
@@ -125,13 +125,13 @@ async function main() {
 
   // 6) --flag=value form (botocore-style) is accepted.
   log = await cli(page,
-    'aws dynamodb get-item --table-name=Music --key \'{"Artist":{"S":"Radiohead"},"SongTitle":{"S":"Paranoid Android"}}\'');
-  assert(log.includes("OK Computer"), "--flag=value form did not resolve (get-item missed)");
+    'aws dynamodb get-item --table-name=Books --key \'{"Author":{"S":"Ursula K. Le Guin"},"Title":{"S":"A Wizard of Earthsea"}}\'');
+  assert((await newest(page).innerText()).includes("1968"), "--flag=value form did not resolve (get-item missed)");
   assert((await page.inputValue("#target")) === "DynamoDB_20120810.GetItem", "equals-form target wrong");
-  console.log("  [6] --flag=value form parses (get-item --table-name=Music)");
+  console.log("  [6] --flag=value form parses (get-item --table-name=Books)");
 
   // 7) non-numeric --limit is rejected (error entry, not silently null).
-  await cli(page, "aws dynamodb scan --table-name Music --limit abc");
+  await cli(page, "aws dynamodb scan --table-name Books --limit abc");
   assert(await newest(page).evaluate((e) => e.classList.contains("err")), "non-numeric --limit not rejected");
   console.log("  [7] non-numeric --limit surfaces a parse error");
 

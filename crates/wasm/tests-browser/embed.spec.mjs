@@ -140,15 +140,22 @@ async function main() {
   console.log("  [1] data browser: Quotes pill '" + pillText + "', 384-d vectors truncated to chips");
 
   // 2) Model/dimension pinning: text flow enabled for Quotes (384d = model),
-  //    disabled for Music (8d != model) with a visible plain-text reason.
+  //    disabled for an 8-d index with a visible plain-text reason. The 8-d
+  //    table is created through the CLI (Pins), since no seed table is 8-d.
+  await cli(page,
+    'aws dynamodb create-table --table-name Pins ' +
+    '--attribute-definitions \'[{"AttributeName":"pk","AttributeType":"S"}]\' ' +
+    '--key-schema \'[{"AttributeName":"pk","KeyType":"HASH"}]\' --billing-mode PAY_PER_REQUEST ' +
+    '--vector-indexes \'[{"IndexName":"vidx8","Dimensions":8,"DistanceFunction":"COSINE",' +
+    '"VectorAttribute":{"AttributeName":"emb"},"Projection":{"ProjectionType":"ALL"}}]\'');
   await page.locator('[data-testid="tab-vec"]').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="vec-table"] option').length >= 2, { timeout: 10000 });
   const modelPill = await page.locator('[data-testid="vec-model-pill"]').innerText();
   assert(modelPill.includes("Xenova/all-MiniLM-L6-v2") && modelPill.includes("384d"),
     "model pill wrong: " + modelPill);
-  await page.locator('[data-testid="vec-table"]').selectOption("Music");
+  await page.locator('[data-testid="vec-table"]').selectOption("Pins");
   assert(await page.locator('[data-testid="vec-embed-run"]').isDisabled(),
-    "text flow should be disabled for the 8-d Music index");
+    "text flow should be disabled for the 8-d Pins index");
   const whyEl = page.locator('[data-testid="vec-embed-why"]');
   assert(await whyEl.isVisible(), "disable reason should be visible, not tooltip-only");
   const why = await whyEl.innerText();
@@ -156,7 +163,7 @@ async function main() {
   await page.locator('[data-testid="vec-table"]').selectOption("Quotes");
   await page.waitForFunction(() => !document.querySelector('[data-testid="vec-embed-run"]').disabled, { timeout: 10000 });
   assert(!(await whyEl.isVisible()), "disable reason should hide when dimensions match");
-  console.log("  [2] dimension pinning: enabled for Quotes (384d), disabled for Music (8d) with visible reason: " + why);
+  console.log("  [2] dimension pinning: enabled for Quotes (384d), disabled for Pins (8d) with visible reason: " + why);
 
   // 3) Text query -> embed in-tab (lazy model load, visible status) ->
   //    ranked, semantically sensible results.

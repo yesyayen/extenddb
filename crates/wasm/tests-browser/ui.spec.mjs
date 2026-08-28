@@ -1,10 +1,10 @@
 // Headless-browser test for the ExtendDB browser playground (U1 demo shell).
 //
 // Serves crates/wasm/web/ and drives it in a real headless Chromium: the engine
-// boots (body[data-ready]), the page is pre-seeded (funny note, 30 tracks), the
+// boots (body[data-ready]), the page is pre-seeded (funny note, 30 books), the
 // boxed timestamped log renders ops, a non-2xx reads as an error entry, Reset
-// re-seeds, the browser observes ZERO network after ready, and each wasm module
-// (engine + dynein CLI) is fetched exactly once at load.
+// re-seeds, the browser observes ZERO network after ready, and the engine wasm
+// module is fetched exactly once at load.
 //
 // Run:  cd crates/wasm/tests-browser && npm install && node ui.spec.mjs
 
@@ -86,12 +86,12 @@ async function main() {
   console.log("  [1] engine ready (body[data-ready])");
   readyReached = true;
 
-  // 2) Pre-seeded, never blank: the funny boot note reports the 30-track seed.
+  // 2) Pre-seeded, never blank: the funny boot note reports the 30-book seed.
   await page.waitForFunction(
-    () => document.querySelector('[data-testid="log"]').innerText.includes("Seeded 30 tracks"),
+    () => document.querySelector('[data-testid="log"]').innerText.includes("Seeded 30 books"),
     { timeout: 10000 }
   );
-  console.log("  [2] pre-seeded: boot note reports 'Seeded 30 tracks'");
+  console.log("  [2] pre-seeded: boot note reports 'Seeded 30 books'");
 
   // 3) Run the pre-loaded Query in the Raw JSON console -> a boxed 200 entry.
   await page.locator('[data-testid="tab-raw"]').click();
@@ -100,8 +100,8 @@ async function main() {
   await waitNewEntry(page, before);
   let log = await logText(page);
   assert(log.includes("Query"), "Query op not shown in log");
-  assert(log.includes("Paranoid Android") && log.includes("Karma Police"),
-    "Query result missing seeded Radiohead items");
+  assert(log.includes("A Wizard of Earthsea") && log.includes("The Left Hand of Darkness"),
+    "Query result missing seeded Le Guin books");
   const newest = page.locator('[data-testid="log-entry"]').first();
   assert((await newest.locator(".log-status").innerText()).trim() === "200", "Query entry not status 200");
   assert(!(await newest.getAttribute("class")).includes("err"), "Query entry wrongly marked error");
@@ -110,14 +110,14 @@ async function main() {
   // 4) Non-2xx renders as an error entry: delete the table, then describe it.
   await page.evaluate(() => {
     document.getElementById("target").value = "DynamoDB_20120810.DeleteTable";
-    document.getElementById("body").value = JSON.stringify({ TableName: "Music" });
+    document.getElementById("body").value = JSON.stringify({ TableName: "Books" });
   });
   before = await entryCount(page);
   await page.locator('[data-testid="run"]').click();
   await waitNewEntry(page, before);
   await page.evaluate(() => {
     document.getElementById("target").value = "DynamoDB_20120810.DescribeTable";
-    document.getElementById("body").value = JSON.stringify({ TableName: "Music" });
+    document.getElementById("body").value = JSON.stringify({ TableName: "Books" });
   });
   before = await entryCount(page);
   await page.locator('[data-testid="run"]').click();
@@ -133,7 +133,7 @@ async function main() {
   await page.locator('[data-testid="reset"]').click();
   await waitNewEntry(page, before);
   await page.waitForFunction(
-    () => document.querySelector('[data-testid="log"]').innerText.includes("re-seeded Music with 30 items"),
+    () => document.querySelector('[data-testid="log"]').innerText.includes("re-seeded Books with 30 items"),
     { timeout: 10000 }
   );
   console.log("  [5] Reset engine re-seeded a fresh in-memory database (30 items)");
@@ -143,22 +143,19 @@ async function main() {
     "browser observed network after ready: " + JSON.stringify(postReadyRequests));
   console.log("  [6] zero network after ready: all ops ran in-tab");
 
-  // 7) Affirmative load-once proof: each wasm module is fetched exactly once,
-  //    at load. The page loads two wasm modules - the engine and the dynein CLI
-  //    (separate module, transport routed to the shared engine) - each once.
+  // 7) Affirmative load-once proof: the engine wasm module is fetched exactly
+  //    once, at load.
   const wasmLoads = allRequests.filter((u) => u.split("?")[0].endsWith(".wasm"));
   const uniqueWasm = [...new Set(wasmLoads.map((u) => u.split("?")[0]))];
   assert(wasmLoads.length === uniqueWasm.length,
     `a wasm module was fetched more than once: ${JSON.stringify(wasmLoads)}`);
-  assert(wasmLoads.some((u) => u.split("?")[0].endsWith("/pkg/extenddb_wasm_bg.wasm")),
-    "engine wasm was not fetched at load");
-  assert(wasmLoads.length >= 1 && wasmLoads.length <= 2,
-    `unexpected wasm load count: ${JSON.stringify(wasmLoads)}`);
-  console.log(`  [7] each wasm module fetched exactly once at load (${wasmLoads.length} modules: load-once story affirmed)`);
+  assert(wasmLoads.length === 1 && wasmLoads[0].split("?")[0].endsWith("/pkg/extenddb_wasm_bg.wasm"),
+    `expected exactly the engine wasm at load: ${JSON.stringify(wasmLoads)}`);
+  console.log("  [7] the engine wasm module fetched exactly once at load (load-once story affirmed)");
 
   await browser.close();
   await new Promise((r) => server.close(r));
-  console.log("UI TEST PASSED: demo shell boots, pre-seeds 30 tracks, boxed timestamped log, error entry + reset, zero network");
+  console.log("UI TEST PASSED: demo shell boots, pre-seeds 30 books, boxed timestamped log, error entry + reset, zero network");
 }
 
 main().catch((e) => fail(String(e && e.stack ? e.stack : e)));

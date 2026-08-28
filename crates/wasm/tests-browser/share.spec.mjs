@@ -87,7 +87,7 @@ async function main() {
     page.on("pageerror", (e) => console.error("PAGE ERROR:", e.message));
 
     const cmd =
-      'aws dynamodb query --table-name Music --key-condition-expression "Artist = :a" --expression-attribute-values \'{":a":{"S":"Radiohead"}}\'';
+      'aws dynamodb query --table-name Books --key-condition-expression "Author = :a" --expression-attribute-values \'{":a":{"S":"Ursula K. Le Guin"}}\'';
     await page.goto(base + "#cmd=" + encodeURIComponent(cmd), { waitUntil: "load" });
     await page.waitForFunction(() => document.body.getAttribute("data-ready") === "true", { timeout: 30000 });
     readyReached = true;
@@ -102,7 +102,7 @@ async function main() {
     await page.waitForFunction(
       () => {
         const t = document.querySelector('[data-testid="log"]').textContent;
-        return t.includes("Paranoid Android") && t.includes("Karma Police");
+        return t.includes("A Wizard of Earthsea") && t.includes("The Left Hand of Darkness");
       },
       { timeout: 10000 }
     );
