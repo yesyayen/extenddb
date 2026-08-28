@@ -98,16 +98,16 @@ async function main() {
   // 1) Default example: a real QueryCommand round-trips through the engine.
   let log = await runSdkSnippet(page, await page.inputValue('[data-testid="sdk"]'));
   assert(!(await newest(page).evaluate((e) => e.classList.contains("err"))), "SDK Query errored");
-  assert(log.includes("Paranoid Android") && log.includes("Karma Police"),
-    "SDK Query missing seeded Radiohead items");
+  assert(log.includes("A Wizard of Earthsea") && log.includes("The Left Hand of Darkness"),
+    "SDK Query missing seeded Le Guin books");
   console.log("  [1] client.send(new QueryCommand(...)) returned the seeded items");
 
   // 2) A failed ConditionExpression surfaces the SDK's TYPED exception class.
   await runSdkSnippet(page,
     'await client.send(new PutItemCommand({' +
-    ' TableName: "Music",' +
-    ' Item: { Artist: { S: "Radiohead" }, SongTitle: { S: "Paranoid Android" } },' +
-    ' ConditionExpression: "attribute_not_exists(Artist)" }));' +
+    ' TableName: "Books",' +
+    ' Item: { Author: { S: "Ursula K. Le Guin" }, Title: { S: "A Wizard of Earthsea" } },' +
+    ' ConditionExpression: "attribute_not_exists(Author)" }));' +
     ' return "should not reach";');
   assert(await newest(page).evaluate((e) => e.classList.contains("err")), "failed condition not an error entry");
   assert((await newest(page).innerText()).includes("ConditionalCheckFailedException"),
@@ -116,18 +116,18 @@ async function main() {
 
   // 3) A write via the SDK is visible to a subsequent SDK read.
   log = await runSdkSnippet(page,
-    'await client.send(new PutItemCommand({ TableName: "Music",' +
-    ' Item: { Artist: { S: "Nirvana" }, SongTitle: { S: "Lithium" }, Year: { N: "1991" } } }));' +
-    ' const g = await client.send(new GetItemCommand({ TableName: "Music",' +
-    ' Key: { Artist: { S: "Nirvana" }, SongTitle: { S: "Lithium" } } }));' +
+    'await client.send(new PutItemCommand({ TableName: "Books",' +
+    ' Item: { Author: { S: "Mary Shelley" }, Title: { S: "The Last Man" }, Year: { N: "1826" } } }));' +
+    ' const g = await client.send(new GetItemCommand({ TableName: "Books",' +
+    ' Key: { Author: { S: "Mary Shelley" }, Title: { S: "The Last Man" } } }));' +
     ' return g.Item;');
-  assert(log.includes("Lithium") && log.includes("1991"),
+  assert(log.includes("The Last Man") && log.includes("1826"),
     "SDK PutItem was not visible to a subsequent SDK GetItem");
   console.log("  [3] SDK PutItem is visible to a subsequent SDK GetItem");
 
   // 4) Uncapped-render guard: a bulk insert via the SDK console caps the grid.
   await runSdkSnippet(page,
-    'for (let i = 0; i < 60; i++) { await client.send(new PutItemCommand({ TableName: "Music", Item: { Artist: { S: "Bulk" }, SongTitle: { S: "t" + i } } })); } return "inserted 60";');
+    'for (let i = 0; i < 60; i++) { await client.send(new PutItemCommand({ TableName: "Books", Item: { Author: { S: "Bulk" }, Title: { S: "t" + i } } })); } return "inserted 60";');
   await page.waitForFunction(
     () => document.querySelectorAll('[data-testid="grid"] tbody tr').length === 50,
     { timeout: 15000 }

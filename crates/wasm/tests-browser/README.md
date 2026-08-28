@@ -6,7 +6,8 @@ gap that the Node smoke and SDK-integration tests cannot cover: actual page
 load, wasm boot in a browser, DOM interaction, and browser-level network
 observation.
 
-The page uses **mode tabs** (CLI / JS SDK / Raw JSON / Vectors / dynein): exactly one console is
+The page uses **mode tabs** in two labeled groups (Clients: CLI / JS SDK / Raw
+JSON; Tools: Workbench): exactly one console is
 visible at a time, so specs click the relevant `tab-*` before driving a panel.
 The **log** is a scrollable column of boxed, millisecond-timestamped entries on
 the left (each entry has `data-testid="log-entry"`; error entries carry `.err`;
@@ -20,9 +21,10 @@ textarea with grouped, bash-formatted sample commands.
 - `sdk.spec.mjs` (U3): the in-page real `@aws-sdk/client-dynamodb` console.
 - `browser.spec.mjs` (U4): the data browser (table selector + live item grid).
 - `share.spec.mjs` (U5): the shareable link (encode command in URL, restore + auto-run).
-- `vector.spec.mjs`: the Vectors tab (create a vector-indexed table from the
-  form, insert via CLI, SearchVectors with a picked item or a typed vector,
-  ranked results with scores, data-browser pill + truncated vector previews,
+- `vector.spec.mjs`: the Workbench's Vectors subsection (collapsible sections
+  with persisted open state, shared context bar, create a vector-indexed table
+  from the form, insert via CLI, SearchVectors with a raw JSON vector, ranked
+  results with a source label, data-browser pill + vector chips,
   raw JSON + CLI `search-vectors` parity, zero network).
 - `embed.spec.mjs`: the text -> vector semantic-search flow (seeded `Quotes`
   table with real 384-d sentence embeddings, in-tab lazy model load with a
@@ -39,12 +41,12 @@ textarea with grouped, bash-formatted sample commands.
 
 1. The WebAssembly engine boots (`body[data-ready="true"]`).
 2. The page is **pre-seeded** (never a blank prompt): the funny boot note reports
-   `Seeded 30 tracks`.
+   `Seeded 30 books`.
 3. Running the pre-loaded `Query` in the Raw JSON console renders a boxed `200`
-   entry with the seeded Radiohead items.
+   entry with the seeded Le Guin books.
 4. A non-2xx response (`DescribeTable` after `DeleteTable`) renders as an
    **error entry** (`.err` box + `ResourceNotFoundException`).
-5. `Reset engine` re-seeds a fresh in-memory database (`re-seeded Music with 30 items`).
+5. `Reset engine` re-seeds a fresh in-memory database (`re-seeded Books with 30 items`).
 6. After ready, the browser observes **zero** network requests while running
    operations (Playwright's own `request` events).
 7. Exactly one `.wasm` fetch happened, at load (affirmative load-once proof).
@@ -102,7 +104,7 @@ gzipped; `wasm-opt` does the shrinking). Budget: 2 MB gzipped.
 
 ## What `browser.spec.mjs` asserts (U4)
 
-1. On boot the grid renders the pre-seeded `Music` table (30 rows, key columns marked).
+1. On boot the grid renders the pre-seeded `Books` table (30 rows, key columns marked).
 2. A `PutItem` (via the Raw console) shows up as a new grid row with no manual
    refresh (30 -> 31, count badge updates).
 3. Zero network after ready: the data browser scans in-tab.
@@ -123,10 +125,10 @@ gzipped; `wasm-opt` does the shrinking). Budget: 2 MB gzipped.
 
 ## What `cli.spec.mjs` asserts (U2)
 
-1. `aws dynamodb list-tables` maps to `ListTables`, returns the seeded `Music`
+1. `aws dynamodb list-tables` maps to `ListTables`, returns the seeded `Books`
    table, and the equivalent wire call is reflected into the raw console.
 2. `query` with a quoted key-condition + single-quoted JSON `--expression-attribute-values`
-   parses and returns the seeded Radiohead items.
+   parses and returns the seeded Le Guin books.
 3. `put-item` then `get-item` round-trips a CLI-written item through the engine.
 4. `scan --limit 2` coerces `--limit` to a numeric `Limit` and caps `Count`.
 5. An invalid JSON flag surfaces a parse-error entry without dispatching.

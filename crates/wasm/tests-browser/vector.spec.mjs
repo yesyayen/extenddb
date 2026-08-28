@@ -1,7 +1,8 @@
-// Headless-browser test for the Vectors tab (vector index + SearchVectors).
+// Headless-browser test for the Workbench's Vectors subsection (vector index
+// + SearchVectors).
 //
 // Serves crates/wasm/web/ and drives it in a real headless Chromium: the
-// seeded Music table carries a COSINE vector index over 8-d embeddings, the
+// seeded Quotes table carries a COSINE vector index over 384-d embeddings, the
 // Vectors subsection is form-driven with a shared table/index context bar and
 // collapsible sections (create / put with text / search) whose open state
 // persists across reloads, the old pick-an-item query dropdown is gone, grid
@@ -99,6 +100,9 @@ function assertAscendingScores(rows, label) {
 }
 
 async function main() {
+  const seed = JSON.parse(await readFile(path.join(WEB_DIR, "data", "quotes-seed.json"), "utf8"));
+  const probe = seed.items[0]; // a real 384-d embedding for exact self-match
+
   const server = await startServer();
   const port = server.address().port;
   const url = `http://127.0.0.1:${port}/index.html`;
@@ -116,14 +120,15 @@ async function main() {
   readyReached = true;
   console.log("  [0] engine ready (body[data-ready])");
 
-  // 1) The seed carries the vector index: data browser pill for Music.
+  // 1) The seed carries the vector index: data browser pill for Quotes.
+  await page.locator('[data-testid="tbl-select"]').selectOption("Quotes");
   const pill = page.locator('[data-testid="tbl-vector"]');
   await page.waitForFunction(() => {
     const p = document.querySelector('[data-testid="tbl-vector"]');
     return p && !p.hidden && p.textContent.includes("vidx");
   }, { timeout: 10000 });
   const pillText = await pill.innerText();
-  assert(pillText.includes("COSINE") && pillText.includes("8d"),
+  assert(pillText.includes("COSINE") && pillText.includes("384d"),
     "vector pill missing metric/dims: " + pillText);
   console.log("  [1] data browser pill shows the seeded vector index: " + pillText);
 
@@ -132,29 +137,29 @@ async function main() {
   const gridChips = page.locator('[data-testid="grid"] [data-testid="vec-chip"]');
   assert((await gridChips.count()) > 0, "grid renders no vector chips");
   const chipText = await gridChips.first().innerText();
-  assert(/\[-?\d+\.\d{3}, -?\d+\.\d{3}, -?\d+\.\d{3}, \u2026\] \u00b7 8d/.test(chipText),
+  assert(/\[-?\d+\.\d{3}, -?\d+\.\d{3}, -?\d+\.\d{3}, \u2026\] \u00b7 384d/.test(chipText),
     "grid chip does not truncate the emb vector: " + chipText);
   // expand: the full JSON appears in a fixed-height scrollable box, then collapses.
   await page.locator('[data-testid="grid"] [data-testid="vec-chip-expand"]').first().click();
   const fullBox = page.locator('[data-testid="grid"] [data-testid="vec-full"]');
   assert((await fullBox.count()) === 1, "chip expand did not open the full-JSON box");
   const fullVec = JSON.parse(await fullBox.innerText());
-  assert(Array.isArray(fullVec) && fullVec.length === 8 && fullVec.every(Number.isFinite),
-    "expanded chip JSON is not the full 8-d vector: " + (await fullBox.innerText()).slice(0, 120));
+  assert(Array.isArray(fullVec) && fullVec.length === 384 && fullVec.every(Number.isFinite),
+    "expanded chip JSON is not the full 384-d vector: " + (await fullBox.innerText()).slice(0, 120));
   await page.locator('[data-testid="grid"] [data-testid="vec-chip-expand"]').first().click();
   assert((await fullBox.count()) === 0, "chip expand did not collapse again");
-  console.log("  [2] grid renders emb as a chip '" + chipText + "' with working expand/collapse");
+  console.log("  [2] grid renders emb as a truncating chip with working expand/collapse");
 
-  // 3) Vectors tab: context bar selects Music/vidx; the item picker is GONE;
+  // 3) Workbench: context bar selects Quotes/vidx; the item picker is GONE;
   //    search the seeded index through the advanced raw-vector input.
   await page.locator('[data-testid="tab-vec"]').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="vec-table"] option').length >= 1, { timeout: 10000 });
   assert((await page.locator('[data-testid="vec-item"]').count()) === 0,
     "the pick-an-item query dropdown should be removed");
-  assert((await page.locator('[data-testid="vec-table"]').inputValue()) === "Music",
-    "Music not selected in the vector table picker");
+  assert((await page.locator('[data-testid="vec-table"]').inputValue()) === "Quotes",
+    "Quotes not selected in the vector table picker");
   const idxLabel = await page.locator('[data-testid="vec-index"] option:checked').innerText();
-  assert(idxLabel.includes("vidx") && idxLabel.includes("COSINE") && idxLabel.includes("8d"),
+  assert(idxLabel.includes("vidx") && idxLabel.includes("COSINE") && idxLabel.includes("384d"),
     "index picker label wrong: " + idxLabel);
   // default section states: search open, create/put/advanced-raw closed.
   assert(await page.locator('[data-testid="vec-sec-search"]').evaluate((d) => d.open), "search section should default open");
@@ -162,7 +167,7 @@ async function main() {
   assert(!(await page.locator('[data-testid="vec-sec-put"]').evaluate((d) => d.open)), "put section should default closed");
   assert(!(await page.locator('[data-testid="vec-sec-raw"]').evaluate((d) => d.open)), "raw input should default closed");
   await page.locator('[data-testid="vec-sec-raw"] > summary').click();
-  await page.locator('[data-testid="vec-query"]').fill("[0.9, 0.2, 0.3, 0, 0.7, 0.4, 0.3, 0.62]");
+  await page.locator('[data-testid="vec-query"]').fill(JSON.stringify(probe.emb));
   await page.locator('[data-testid="vec-k"]').fill("5");
   let before = await entryCount(page);
   await page.locator('[data-testid="vec-run"]').click();
@@ -172,17 +177,17 @@ async function main() {
     "SearchVectors log entry missing/failed: " + entry.text.slice(0, 300));
   let rows = await resultRows(page);
   assert(rows.length === 5, "expected 5 ranked rows, got " + rows.length);
-  const scores = assertAscendingScores(rows, "Music search");
+  const scores = assertAscendingScores(rows, "Quotes search");
   assert(scores[0] === 0, "self-match should score 0.0000, got " + scores[0]);
   const flat = rows.map((r) => r.join(" ")).join("\n");
-  assert(flat.includes("Paranoid Android"), "top result should be the queried item:\n" + flat);
+  assert(flat.includes(probe.pk), "top result should be the queried item:\n" + flat);
   // The engine omits the vector attribute from SearchVectors results unless a
   // ProjectionExpression asks for it (parity-verified against native sqlite),
   // so ranked rows are naturally float-wall-free.
   assert((await page.locator('[data-testid="vec-result-row"] [data-testid="vec-chip"]').count()) === 0,
     "vector attribute unexpectedly returned by default:\n" + flat);
   const label = await page.locator('[data-testid="vec-results-label"]').innerText();
-  assert(label.includes("raw vector") && label.includes("Music/vidx"),
+  assert(label.includes("raw vector") && label.includes("Quotes/vidx"),
     "results label does not name the raw-vector input: " + label);
   console.log("  [3] raw-vector search: item picker gone, 5 ranked results, ascending scores, self-match first, labeled '" + label + "'");
 
@@ -235,11 +240,15 @@ async function main() {
     "euclidean ranking wrong for orange query: " + JSON.stringify(order));
   console.log("  [6] raw-vector search on Colors ranks yellow < red < blue for 'orange' (TopK > item count OK)");
 
-  // 5) Raw JSON console: the SearchVectors sample round-trips.
+  // 5) Raw JSON console: the SearchVectors sample (built from the Quotes seed)
+  //    round-trips.
   await page.locator('[data-testid="tab-raw"]').click();
   await page.locator("#sample-buttons button", { hasText: "SearchVectors" }).first().click();
   assert((await page.locator("#target").inputValue()) === "DynamoDB_20120810.SearchVectors",
     "SearchVectors sample did not load the target");
+  const sampleBody = JSON.parse(await page.locator("#body").inputValue());
+  assert(sampleBody.TableName === "Quotes" && sampleBody.SearchVector.length === 384,
+    "SearchVectors sample not built from the Quotes seed");
   before = await entryCount(page);
   await page.locator('[data-testid="run"]').click();
   await waitNewEntry(page, before);

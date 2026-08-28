@@ -1,7 +1,7 @@
 // Headless-browser test for the ExtendDB browser playground (U4 data browser).
 //
 // Drives the table selector + live item grid in a real headless Chromium: the
-// grid renders the pre-seeded Music table (30 tracks), a write shows up as a
+// grid renders the pre-seeded Books table (30 rows), a write shows up as a
 // new row without a manual refresh, and everything runs in-tab (zero network).
 //
 // Run:  cd crates/wasm/tests-browser && node browser.spec.mjs
@@ -66,27 +66,27 @@ async function main() {
   await page.waitForFunction(() => document.body.getAttribute("data-ready") === "true", { timeout: 30000 });
   readyReached = true;
 
-  // 1) On boot the grid renders the pre-seeded Music table (30 rows).
+  // 1) On boot the grid renders the pre-seeded Books table (30 rows).
   await page.waitForFunction(
     () => document.querySelectorAll('[data-testid="grid"] tbody tr').length === 30,
     { timeout: 10000 }
   );
   let gridText = await page.locator('[data-testid="grid"]').innerText();
-  assert(gridText.includes("Radiohead") && gridText.includes("Paranoid Android"),
-    "grid missing seeded Music rows");
-  assert(/Artist \(partition key\)/.test(gridText) && /SongTitle \(sort key\)/.test(gridText),
+  assert(gridText.includes("Ursula K. Le Guin") && gridText.includes("A Wizard of Earthsea"),
+    "grid missing seeded Books rows");
+  assert(/Author \(partition key\)/.test(gridText) && /Title \(sort key\)/.test(gridText),
     "grid did not label partition/sort key columns");
   const count0 = (await page.locator('[data-testid="tbl-count"]').innerText()).trim();
   assert(count0 === "30 items", `count badge wrong: "${count0}"`);
-  console.log("  [1] grid renders the pre-seeded Music table (30 rows, key columns marked)");
+  console.log("  [1] grid renders the pre-seeded Books table (30 rows, key columns marked)");
 
   // 2) A write appears as a new row without a manual refresh (via Raw console).
   await page.locator('[data-testid="tab-raw"]').click();
   await page.evaluate(() => {
     document.getElementById("target").value = "DynamoDB_20120810.PutItem";
     document.getElementById("body").value = JSON.stringify({
-      TableName: "Music",
-      Item: { Artist: { S: "Blur" }, SongTitle: { S: "Song 2" }, Year: { N: "1997" } },
+      TableName: "Books",
+      Item: { Author: { S: "Ted Chiang" }, Title: { S: "Exhalation" }, Year: { N: "2019" } },
     });
   });
   await page.locator('[data-testid="run"]').click();
@@ -95,7 +95,7 @@ async function main() {
     { timeout: 10000 }
   );
   gridText = await page.locator('[data-testid="grid"]').innerText();
-  assert(gridText.includes("Blur") && gridText.includes("Song 2"),
+  assert(gridText.includes("Exhalation") && gridText.includes("2019"),
     "written item did not appear in the grid");
   const count1 = (await page.locator('[data-testid="tbl-count"]').innerText()).trim();
   assert(count1 === "31 items", `count badge after write wrong: "${count1}"`);
