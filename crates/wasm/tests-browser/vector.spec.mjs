@@ -2,12 +2,15 @@
 //
 // Serves crates/wasm/web/ and drives it in a real headless Chromium: the
 // seeded Music table carries a COSINE vector index over 8-d embeddings, the
-// Vectors tab creates a fresh vector-indexed table from the form, items are
-// inserted through the CLI shell, SearchVectors runs from the panel (both a
-// picked item and a typed vector) and renders ranked results with scores,
-// the data browser shows the vector index pill and truncated vector previews,
-// the raw JSON and CLI consoles round-trip SearchVectors, and the browser
-// observes ZERO network requests after ready.
+// Vectors subsection is form-driven with a shared table/index context bar and
+// collapsible sections (create / put with text / search) whose open state
+// persists across reloads, the old pick-an-item query dropdown is gone, grid
+// vectors render as truncating chips with expand/copy, a fresh vector-indexed
+// table is created from the form, items are inserted through the CLI shell,
+// SearchVectors runs from the advanced raw-vector input and renders ranked
+// results with scores and a source label, the raw JSON and CLI consoles
+// round-trip SearchVectors, and the browser observes ZERO network requests
+// after ready.
 //
 // Run:  cd crates/wasm/tests-browser && npm install && node vector.spec.mjs
 
@@ -124,26 +127,42 @@ async function main() {
     "vector pill missing metric/dims: " + pillText);
   console.log("  [1] data browser pill shows the seeded vector index: " + pillText);
 
-  // 2) Vector attributes render as truncated previews in the grid, not walls
-  //    of floats: exactly 3 leading dims, an ellipsis, and the dim count.
-  const gridText = await page.locator('[data-testid="grid"]').innerText();
-  assert(/\[[-0-9.]+, [-0-9.]+, [-0-9.]+, \u2026\] \(8d\)/.test(gridText),
-    "grid does not truncate the emb vector: " + gridText.slice(0, 400));
-  console.log("  [2] grid renders emb as a truncated preview '[a, b, c, \u2026] (8d)'");
+  // 2) Vector attributes render as truncating chips in the grid, not walls
+  //    of floats: 3 leading dims, an ellipsis, the dim count, and expand/copy.
+  const gridChips = page.locator('[data-testid="grid"] [data-testid="vec-chip"]');
+  assert((await gridChips.count()) > 0, "grid renders no vector chips");
+  const chipText = await gridChips.first().innerText();
+  assert(/\[-?\d+\.\d{3}, -?\d+\.\d{3}, -?\d+\.\d{3}, \u2026\] \u00b7 8d/.test(chipText),
+    "grid chip does not truncate the emb vector: " + chipText);
+  // expand: the full JSON appears in a fixed-height scrollable box, then collapses.
+  await page.locator('[data-testid="grid"] [data-testid="vec-chip-expand"]').first().click();
+  const fullBox = page.locator('[data-testid="grid"] [data-testid="vec-full"]');
+  assert((await fullBox.count()) === 1, "chip expand did not open the full-JSON box");
+  const fullVec = JSON.parse(await fullBox.innerText());
+  assert(Array.isArray(fullVec) && fullVec.length === 8 && fullVec.every(Number.isFinite),
+    "expanded chip JSON is not the full 8-d vector: " + (await fullBox.innerText()).slice(0, 120));
+  await page.locator('[data-testid="grid"] [data-testid="vec-chip-expand"]').first().click();
+  assert((await fullBox.count()) === 0, "chip expand did not collapse again");
+  console.log("  [2] grid renders emb as a chip '" + chipText + "' with working expand/collapse");
 
-  // 3) Vectors tab: search the seeded Music index by picking an existing item.
+  // 3) Vectors tab: context bar selects Music/vidx; the item picker is GONE;
+  //    search the seeded index through the advanced raw-vector input.
   await page.locator('[data-testid="tab-vec"]').click();
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="vec-item"] option').length > 1, { timeout: 10000 });
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="vec-table"] option').length >= 1, { timeout: 10000 });
+  assert((await page.locator('[data-testid="vec-item"]').count()) === 0,
+    "the pick-an-item query dropdown should be removed");
   assert((await page.locator('[data-testid="vec-table"]').inputValue()) === "Music",
     "Music not selected in the vector table picker");
   const idxLabel = await page.locator('[data-testid="vec-index"] option:checked').innerText();
   assert(idxLabel.includes("vidx") && idxLabel.includes("COSINE") && idxLabel.includes("8d"),
     "index picker label wrong: " + idxLabel);
-  // pick "Radiohead · Paranoid Android" as the query item
-  const itemLabel = "Radiohead \u00b7 Paranoid Android";
-  await page.locator('[data-testid="vec-item"]').selectOption({ label: itemLabel });
-  const q = await page.locator('[data-testid="vec-query"]').inputValue();
-  assert(q.startsWith("[0.9, 0.2, 0.3"), "picking an item did not fill the query vector: " + q);
+  // default section states: search open, create/put/advanced-raw closed.
+  assert(await page.locator('[data-testid="vec-sec-search"]').evaluate((d) => d.open), "search section should default open");
+  assert(!(await page.locator('[data-testid="vec-sec-create"]').evaluate((d) => d.open)), "create section should default closed");
+  assert(!(await page.locator('[data-testid="vec-sec-put"]').evaluate((d) => d.open)), "put section should default closed");
+  assert(!(await page.locator('[data-testid="vec-sec-raw"]').evaluate((d) => d.open)), "raw input should default closed");
+  await page.locator('[data-testid="vec-sec-raw"] > summary').click();
+  await page.locator('[data-testid="vec-query"]').fill("[0.9, 0.2, 0.3, 0, 0.7, 0.4, 0.3, 0.62]");
   await page.locator('[data-testid="vec-k"]').fill("5");
   let before = await entryCount(page);
   await page.locator('[data-testid="vec-run"]').click();
@@ -160,13 +179,18 @@ async function main() {
   // The engine omits the vector attribute from SearchVectors results unless a
   // ProjectionExpression asks for it (parity-verified against native sqlite),
   // so ranked rows are naturally float-wall-free.
-  assert(!flat.includes("(8d)"), "vector attribute unexpectedly returned by default:\n" + flat);
-  console.log("  [3] pick-an-item search: 5 ranked results, ascending scores, self-match first (score 0)");
-  console.log("      top-3: " + rows.slice(0, 3).map((r) => `#${r[0]} ${r[1]} ${r.slice(2, 4).join(" / ")}`).join(" | "));
+  assert((await page.locator('[data-testid="vec-result-row"] [data-testid="vec-chip"]').count()) === 0,
+    "vector attribute unexpectedly returned by default:\n" + flat);
+  const label = await page.locator('[data-testid="vec-results-label"]').innerText();
+  assert(label.includes("raw vector") && label.includes("Music/vidx"),
+    "results label does not name the raw-vector input: " + label);
+  console.log("  [3] raw-vector search: item picker gone, 5 ranked results, ascending scores, self-match first, labeled '" + label + "'");
 
-  // 4) Full UI flow on a fresh table: create (form) -> insert (CLI) -> search
-  //    (typed vector) -> ranked results.
+  // 4) Full UI flow on a fresh table: create (collapsed form section) ->
+  //    insert (CLI) -> search (raw vector) -> ranked results.
   await page.locator('[data-testid="tab-vec"]').click();
+  await page.locator('[data-testid="vec-sec-create"] > summary').click();
+  assert(await page.locator('[data-testid="vec-sec-create"]').evaluate((d) => d.open), "create section did not open");
   await page.locator('[data-testid="vec-new-table"]').fill("Colors");
   await page.locator('[data-testid="vec-new-index"]').fill("cidx");
   await page.locator('[data-testid="vec-new-attr"]').fill("rgb");
@@ -192,9 +216,12 @@ async function main() {
   }
   console.log("  [5] inserted red/yellow/blue via the CLI shell");
 
-  // search with a typed query vector: orange = [1, 0.6, 0]
+  // search with a raw query vector: orange = [1, 0.6, 0] (the advanced input
+  // is still open from step 3; its state persisted in this session).
   await page.locator('[data-testid="tab-vec"]').click();
   await page.locator('[data-testid="vec-table"]').selectOption("Colors");
+  assert(await page.locator('[data-testid="vec-sec-raw"]').evaluate((d) => d.open),
+    "advanced raw input should still be open (persisted within the session)");
   await page.locator('[data-testid="vec-query"]').fill("[1, 0.6, 0]");
   await page.locator('[data-testid="vec-k"]').fill("10");
   before = await entryCount(page);
@@ -206,7 +233,7 @@ async function main() {
   const order = rows.map((r) => r[2]);
   assert(JSON.stringify(order) === JSON.stringify(["yellow", "red", "blue"]),
     "euclidean ranking wrong for orange query: " + JSON.stringify(order));
-  console.log("  [6] typed-vector search on Colors ranks yellow < red < blue for 'orange' (TopK > item count OK)");
+  console.log("  [6] raw-vector search on Colors ranks yellow < red < blue for 'orange' (TopK > item count OK)");
 
   // 5) Raw JSON console: the SearchVectors sample round-trips.
   await page.locator('[data-testid="tab-raw"]').click();
@@ -236,9 +263,21 @@ async function main() {
     "browser observed network after ready: " + JSON.stringify(postReadyRequests));
   console.log("  [9] zero network after ready: the whole vector flow ran in-tab");
 
+  // 8) Section open/closed state persists across a reload (localStorage):
+  //    create + advanced-raw were opened above, put stayed closed.
+  readyReached = false; // the reload's own fetches are expected
+  await page.reload({ waitUntil: "load" });
+  await page.waitForFunction(() => document.body.getAttribute("data-ready") === "true", { timeout: 30000 });
+  await page.locator('[data-testid="tab-vec"]').click();
+  for (const [sec, want] of [["vec-sec-create", true], ["vec-sec-raw", true], ["vec-sec-put", false], ["vec-sec-search", true]]) {
+    const open = await page.locator(`[data-testid="${sec}"]`).evaluate((d) => d.open);
+    assert(open === want, `${sec} open state not persisted across reload: got ${open}, want ${want}`);
+  }
+  console.log("  [10] section open/closed state persisted across reload (create/raw open, put closed, search open)");
+
   await browser.close();
   await new Promise((r) => server.close(r));
-  console.log("VECTOR TEST PASSED: create -> insert -> search -> ranked results, browser pill + truncation, raw/CLI parity, zero network");
+  console.log("VECTOR TEST PASSED: collapsible sections + persistence, item picker removed, vector chips, create -> insert -> search -> labeled ranked results, raw/CLI parity, zero network");
 }
 
 main().catch((e) => fail(String(e && e.stack ? e.stack : e)));
