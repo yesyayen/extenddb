@@ -175,6 +175,13 @@ async function main() {
   await page.locator('[data-testid="vec-sec-raw"] > summary').click();
   await page.locator('[data-testid="vec-query"]').fill(JSON.stringify(probe.emb));
   await page.locator('[data-testid="vec-k"]').fill("5");
+  // Layout stability: rendering a wide results table must not resize the two
+  // page columns (the table scrolls horizontally inside its own wrap).
+  const colWidths = () => page.evaluate(() => [
+    document.querySelector(".cols .left").getBoundingClientRect().width,
+    document.querySelector(".cols .right").getBoundingClientRect().width,
+  ]);
+  const widthsBefore = await colWidths();
   let before = await entryCount(page);
   await page.locator('[data-testid="vec-run"]').click();
   await waitNewEntry(page, before);
@@ -195,7 +202,10 @@ async function main() {
   const label = await page.locator('[data-testid="vec-results-label"]').innerText();
   assert(label.includes("raw vector") && label.includes("Quotes/vidx"),
     "results label does not name the raw-vector input: " + label);
-  console.log("  [3] raw-vector search: all sections default closed, tab renamed, item picker gone, 5 ranked results, ascending scores, self-match first, labeled '" + label + "'");
+  const widthsAfter = await colWidths();
+  assert(Math.abs(widthsAfter[0] - widthsBefore[0]) < 1 && Math.abs(widthsAfter[1] - widthsBefore[1]) < 1,
+    "results table resized the page columns: " + JSON.stringify(widthsBefore) + " -> " + JSON.stringify(widthsAfter));
+  console.log("  [3] raw-vector search: all sections default closed, tab renamed, item picker gone, 5 ranked results, ascending scores, self-match first, stable column widths, labeled '" + label + "'");
 
   // 4) Full UI flow on a fresh table: create (collapsed form section) ->
   //    insert (CLI) -> search (raw vector) -> ranked results.

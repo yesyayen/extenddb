@@ -47,7 +47,9 @@
     header code { color: var(--accent); }
     #theme-toggle { white-space: nowrap; padding: 5px 10px; font-size: 12.5px; }
 
-    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 18px 24px; align-items: start; }
+    /* minmax(0, 1fr): a wide child (e.g. the nowrap results table) must never
+       inflate its column and shrink the other; it scrolls inside its own wrap. */
+    .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; padding: 18px 24px; align-items: start; }
     .cols .right { order: 1; }  /* console: left */
     .cols .left { order: 2; }   /* log: right */
     @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
@@ -301,7 +303,7 @@
               <div id="vec-add-attrs" data-testid="vec-add-attrs"></div>
               <div class="row">
                 <button id="vec-attr-add" data-testid="vec-attr-add">Add attribute</button>
-                <button id="vec-add-run" data-testid="vec-add-run">Embed &amp; put item</button>
+                <button id="vec-add-run" data-testid="vec-add-run" class="primary">Embed &amp; put item</button>
                 <span id="vec-add-why" class="why" data-testid="vec-add-why" hidden></span>
               </div>
             </div>
