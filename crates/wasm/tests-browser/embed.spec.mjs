@@ -7,11 +7,13 @@
 // status), fills the query-vector field, and returns semantically sensible
 // ranked results; the in-browser embedding of a seed sentence matches the
 // checked-in build-time embedding within float tolerance (seed/query model
-// drift guard); "add item with text" embeds and PutItems; the embed -> wire
-// vector JSON helper output pastes straight into the CLI shell; the text
-// flow is pinned to the model's dimensions (other indexes keep the raw
-// flow); CLI create-table still accepts arbitrary dimensions; and the
-// browser observes ZERO non-same-origin network requests, ever.
+// drift guard); "add item with text" embeds and PutItems from its collapsible
+// section; the embed -> wire vector JSON helper logs a collapsed dispatch-style
+// entry whose JSON pastes straight into the CLI shell; the text flow is
+// pinned to the model's dimensions with a visible disable reason (other
+// indexes keep the raw flow); CLI create-table still accepts arbitrary
+// dimensions; and the browser observes ZERO non-same-origin network
+// requests, ever.
 //
 // Run:  cd crates/wasm/tests-browser && npm install && node embed.spec.mjs
 
@@ -134,11 +136,11 @@ async function main() {
   const pillText = await page.locator('[data-testid="tbl-vector"]').innerText();
   assert(pillText.includes("COSINE") && pillText.includes("384d"), "Quotes vector pill wrong: " + pillText);
   const gridText = await page.locator('[data-testid="grid"]').innerText();
-  assert(gridText.includes("(384d)"), "grid does not truncate 384-d vectors: " + gridText.slice(0, 300));
-  console.log("  [1] data browser: Quotes pill '" + pillText + "', 384-d vectors truncated");
+  assert(gridText.includes("\u00b7 384d"), "grid does not truncate 384-d vectors to chips: " + gridText.slice(0, 300));
+  console.log("  [1] data browser: Quotes pill '" + pillText + "', 384-d vectors truncated to chips");
 
   // 2) Model/dimension pinning: text flow enabled for Quotes (384d = model),
-  //    disabled for Music (8d != model) with an explanatory tooltip.
+  //    disabled for Music (8d != model) with a visible plain-text reason.
   await page.locator('[data-testid="tab-vec"]').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="vec-table"] option').length >= 2, { timeout: 10000 });
   const modelPill = await page.locator('[data-testid="vec-model-pill"]').innerText();
@@ -147,11 +149,14 @@ async function main() {
   await page.locator('[data-testid="vec-table"]').selectOption("Music");
   assert(await page.locator('[data-testid="vec-embed-run"]').isDisabled(),
     "text flow should be disabled for the 8-d Music index");
-  const why = await page.locator('[data-testid="vec-embed-run"]').getAttribute("title");
-  assert(why.includes("8d") && why.includes("384"), "mismatch tooltip unhelpful: " + why);
+  const whyEl = page.locator('[data-testid="vec-embed-why"]');
+  assert(await whyEl.isVisible(), "disable reason should be visible, not tooltip-only");
+  const why = await whyEl.innerText();
+  assert(why.includes("8d") && why.includes("384"), "mismatch reason unhelpful: " + why);
   await page.locator('[data-testid="vec-table"]').selectOption("Quotes");
   await page.waitForFunction(() => !document.querySelector('[data-testid="vec-embed-run"]').disabled, { timeout: 10000 });
-  console.log("  [2] dimension pinning: enabled for Quotes (384d), disabled for Music (8d): " + why);
+  assert(!(await whyEl.isVisible()), "disable reason should hide when dimensions match");
+  console.log("  [2] dimension pinning: enabled for Quotes (384d), disabled for Music (8d) with visible reason: " + why);
 
   // 3) Text query -> embed in-tab (lazy model load, visible status) ->
   //    ranked, semantically sensible results.
@@ -165,10 +170,20 @@ async function main() {
   let entry = await newestEntry(page);
   assert(entry.text.includes("SearchVectors") && entry.text.includes("200"),
     "SearchVectors after embed failed: " + entry.text.slice(0, 300));
-  const q = await page.locator('[data-testid="vec-query"]').inputValue();
-  const qvec = JSON.parse(q);
+  // The embedded query renders as a chip (no wall of floats); expanding it
+  // shows the full 384-d JSON in a fixed-height box.
+  const lastQ = page.locator('[data-testid="vec-last-query"]');
+  assert(await lastQ.isVisible(), "query-vector chip holder not shown after embed");
+  const chipText = await lastQ.locator('[data-testid="vec-chip"]').innerText();
+  assert(chipText.includes("\u00b7 384d"), "query chip not truncated with dims: " + chipText);
+  await lastQ.locator('[data-testid="vec-chip-expand"]').click();
+  const qvec = JSON.parse(await lastQ.locator('[data-testid="vec-full"]').innerText());
   assert(Array.isArray(qvec) && qvec.length === 384 && qvec.every(Number.isFinite),
-    "query-vector field not filled with a 384-d array");
+    "expanded query chip is not a 384-d array");
+  await lastQ.locator('[data-testid="vec-chip-expand"]').click();
+  const srcLabel = await page.locator('[data-testid="vec-results-label"]').innerText();
+  assert(srcLabel.includes("text") && srcLabel.includes("Quotes/vidx"),
+    "results label does not name the text input: " + srcLabel);
   let rows = await resultRows(page);
   assert(rows.length === 5, "expected 5 ranked rows, got " + rows.length);
   const scores = rows.map((r) => Number(r[1]));
@@ -195,7 +210,10 @@ async function main() {
   assert(dot >= 0.9999, `seed/browser embedding cosine too low for '${probe.pk}': ${dot}`);
   console.log(`  [4] determinism: '${probe.pk}' build-time vs in-browser embedding: max abs diff ${maxDiff.toExponential(2)}, cosine ${dot.toFixed(6)}`);
 
-  // 5) Add item with text: embed + PutItem, then find it by its own text.
+  // 5) Add item with text (collapsible section): embed + PutItem, then find
+  //    it by its own text.
+  await page.locator('[data-testid="vec-sec-put"] > summary').click();
+  assert(await page.locator('[data-testid="vec-sec-put"]').evaluate((d) => d.open), "put section did not open");
   await page.locator('[data-testid="vec-add-pk"]').fill("mine-01");
   await page.locator('[data-testid="vec-add-text"]').fill("The best debugging tool is a rubber duck that listens.");
   before = await entryCount(page);
@@ -213,14 +231,23 @@ async function main() {
     "added item should self-match first with ~0 score: " + rows[0].join(" | "));
   console.log("  [5] add-item-with-text: mine-01 inserted and self-matches (score " + rows[0][1] + ")");
 
-  // 6) Embed -> wire vector JSON helper, pasted into the wire-faithful CLI.
+  // 6) Embed -> wire vector JSON helper: a dispatch-style log entry, one-line
+  //    header (chars, dims, ms), the vector JSON collapsed by default behind
+  //    the standard expand control; expanded, it pastes into the CLI.
   await page.locator('[data-testid="vec-text"]').fill("rain landing on dusty ground");
   before = await entryCount(page);
   await page.locator('[data-testid="vec-embed-copy"]').click();
   await waitNewEntry(page, before);
+  const helperEntry = page.locator('[data-testid="log-entry"]').first();
+  entry = await newestEntry(page);
+  assert(entry.text.includes("EmbedText") && /\d+-char query text/.test(entry.text) && entry.text.includes("384d") && /\d+ ms/.test(entry.text),
+    "helper entry header missing chars/dims/ms: " + entry.text.slice(0, 200));
+  assert(!entry.text.includes('{"N":'),
+    "helper vector JSON should be collapsed by default: " + entry.text.slice(0, 200));
+  await helperEntry.locator('[data-testid="log-expand"]').click();
   entry = await newestEntry(page);
   const m = entry.text.match(/(\[\{"N":".*\}\])/);
-  assert(m, "helper note has no wire-format vector: " + entry.text.slice(0, 200));
+  assert(m, "expanded helper entry has no wire-format vector: " + entry.text.slice(0, 200));
   const wire = JSON.parse(m[1]);
   assert(wire.length === 384 && wire.every((e) => typeof e.N === "string" && Number.isFinite(Number(e.N))),
     "wire vector malformed");
@@ -229,7 +256,7 @@ async function main() {
   assert(cliOut.text.includes("SearchVectors") && cliOut.text.includes("SearchResults") && !cliOut.cls.includes("err"),
     "CLI search-vectors with pasted embedding failed: " + cliOut.text.slice(0, 300));
   assert(cliOut.text.includes("wx-01"), "pasted-embedding CLI search missed the petrichor quote: " + cliOut.text.slice(0, 500));
-  console.log("  [6] embed -> vector JSON helper output pastes into CLI search-vectors (top hit wx-01)");
+  console.log("  [6] embed helper logs collapsed; expanded JSON pastes into CLI search-vectors (top hit wx-01)");
 
   // 7) The model restriction is UI-only: CLI create-table still accepts
   //    arbitrary dimensions (engine behavior unchanged).
@@ -255,7 +282,7 @@ async function main() {
 
   await browser.close();
   await new Promise((r) => server.close(r));
-  console.log("EMBED TEST PASSED: text -> embed -> semantic results, determinism, add-with-text, CLI paste helper, dimension pinning, same-origin only");
+  console.log("EMBED TEST PASSED: text -> embed -> semantic results, determinism, add-with-text section, collapsed CLI paste helper, visible dimension pinning, same-origin only");
 }
 
 main().catch((e) => fail(String(e && e.stack ? e.stack : e)));
