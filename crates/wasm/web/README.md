@@ -10,11 +10,8 @@ no server, no network.
 # from the repo root: build the web-target engine wasm into web/pkg
 scripts/wasm-build.sh --target web --dev --out-dir web/pkg
 
-# build the dynein CLI wasm into web/pkg-dynein (powers the "dynein" tab)
-scripts/dynein-wasm-build.sh --target web --dev --out-dir ../wasm/web/pkg-dynein
-
 # vendor the text-embedding runtime + model into web/vendor + web/models
-# (powers the Vectors tab's semantic text search; optional, degrades gracefully)
+# (powers the Workbench's semantic text search; optional, degrades gracefully)
 cd crates/wasm/tools && npm install && node vendor-embed-assets.mjs && cd -
 
 # serve this directory over http (any static server works)
@@ -22,10 +19,9 @@ cd crates/wasm/web && python3 -m http.server 8099
 # open http://localhost:8099/
 ```
 
-The dynein tab degrades gracefully: if `pkg-dynein` is absent the tab disables
-itself and the rest of the page works. The same holds for the embedding
-assets: without `web/vendor` + `web/models` the Vectors tab's text flow
-reports the model as unavailable and everything else works.
+The embedding assets degrade gracefully: without `web/vendor` + `web/models`
+the Workbench's text flow reports the model as unavailable and everything
+else works.
 
 The seeded `Quotes` table's 384-d sentence embeddings live in
 `web/data/quotes-seed.json` (checked in), precomputed by
@@ -58,26 +54,27 @@ See `../tests-node/sdk-integration.mjs` for the Node integration test.
 
 ## Interfaces (one shared engine)
 
-The page offers five ways to drive the same in-tab database, so a write from any
-one is visible to all and to the data browser:
+The tab row holds two groups (see `UI-GRAMMAR.md` for the full UI rules):
+**Clients** speak the wire protocol the way a customer would; **Tools** are
+form-driven surfaces that compose real wire calls. All of them drive the same
+in-tab database, so a write from any one is visible to all and to the data
+browser:
 
-- **CLI**: an `aws dynamodb <op> --flags` shell (parsed in JS to the wire call).
-- **JS SDK**: the real `@aws-sdk/client-dynamodb` over the requestHandler shim.
-- **Raw JSON**: hand-write `X-Amz-Target` + body.
-- **Vectors**: a first-class vector-search panel. Create a table with a vector
-  index (index name, dimensions, distance metric), then run `SearchVectors`
-  against any vector-indexed table: pick an existing item as the query (its
-  embedding fills the query box) or type a JSON array, set `TopK`, and get a
-  ranked results table with scores. The seeded `Music` table carries a COSINE
-  index (`vidx`) over hand-crafted 8-d feature embeddings, so similarity search
-  works out of the box. The data browser marks vector-indexed tables with a
-  pill and truncates vector attributes to a short preview.
-- **dynein**: the real [awslabs/dynein](https://github.com/awslabs/dynein) CLI,
-  vendored and compiled to a second wasm module (`pkg-dynein`). dynein's own
-  DynamoDB transport is routed to this page's engine via
-  `set_host_dispatch(dispatch_http)`, so `dy list`, `dy -t Music query ...`,
-  `dy admin create table ...` all hit the same database. See
-  `crates/dynein-wasm`.
+- **CLI** (client): an `aws dynamodb <op> --flags` shell (parsed in JS to the wire call).
+- **JS SDK** (client): the real `@aws-sdk/client-dynamodb` over the requestHandler shim.
+- **Raw JSON** (client): hand-write `X-Amz-Target` + body.
+- **Workbench** (tool): collapsible form-driven sections, today one `Vectors`
+  subsection: a shared table/index context bar, create a table with a vector
+  index (index name, dimensions, distance metric), put/update an item from
+  plain text (embedded in-tab), and `SearchVectors` with query text (primary)
+  or a raw JSON vector (advanced). Results render as a ranked table with
+  scores. The seeded `Quotes` table carries a COSINE index (`vidx`) over real
+  384-d sentence embeddings, so semantic search works out of the box. The
+  data browser marks vector-indexed tables with a pill and renders vector
+  attributes as truncating chips with expand/copy.
+
+The seeded `Books` table (30 rows, `Author` + `Title` composite key) is the
+general-purpose non-vector demo table for the client tabs.
 
 ## Scope
 
