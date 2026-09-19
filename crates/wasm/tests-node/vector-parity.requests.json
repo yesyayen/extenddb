@@ -231,6 +231,36 @@
       "TopK": 5
     }
   },
+  {
+    "target": "Query",
+    "body": {
+      "TableName": "VP_Cosine",
+      "IndexName": "vidx",
+      "KeyConditionExpression": "pk = :p",
+      "ExpressionAttributeValues": { ":p": { "S": "b" } }
+    }
+  },
+  {
+    "target": "Query",
+    "body": {
+      "TableName": "VP_Cosine",
+      "IndexName": "vidx",
+      "ConsistentRead": true,
+      "KeyConditionExpression": "pk = :p",
+      "ExpressionAttributeValues": { ":p": { "S": "b" } }
+    }
+  },
+  { "target": "Scan", "body": { "TableName": "VP_Cosine", "IndexName": "vidx" } },
+  {
+    "target": "Query",
+    "body": {
+      "TableName": "VP_Cosine",
+      "IndexName": "nosuch",
+      "KeyConditionExpression": "pk = :p",
+      "ExpressionAttributeValues": { ":p": { "S": "b" } }
+    }
+  },
+  { "target": "Scan", "body": { "TableName": "VP_Cosine", "IndexName": "nosuch" } },
   { "target": "DeleteTable", "body": { "TableName": "VP_Cosine" } },
   { "target": "DeleteTable", "body": { "TableName": "VP_Scoped" } }
 ]

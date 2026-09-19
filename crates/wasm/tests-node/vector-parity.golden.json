@@ -512,6 +512,46 @@
   },
   {
     "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "Query operation not supported on this index type."
+    },
+    "status": 400,
+    "target": "Query"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "Consistent reads are not supported on global secondary indexes"
+    },
+    "status": 400,
+    "target": "Query"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "Scan operation not supported on this index type"
+    },
+    "status": 400,
+    "target": "Scan"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "The table does not have the specified index: nosuch"
+    },
+    "status": 400,
+    "target": "Query"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "The table does not have the specified index: nosuch"
+    },
+    "status": 400,
+    "target": "Scan"
+  },
+  {
+    "body": {
       "TableDescription": {
         "AttributeDefinitions": [
           {

@@ -132,9 +132,15 @@ impl TableEngine for SqliteWasmEngine {
     fn index_info_by_table_id(
         &self,
         _table_id: &str,
-        _index_name: &str,
+        index_name: &str,
     ) -> BoxFuture<'_, Result<IndexInfo, StorageError>> {
-        unsupported()
+        // This backend has no GSI/LSI catalog, so every name is absent from
+        // it, which is exactly what the native backend reports for a name
+        // that is not an `indexes` row. Query and Scan re-resolve a not-found
+        // name against the table's vector index metadata, so a vector index
+        // named here draws the same refusal as on native instead of a 500.
+        let index_name = index_name.to_owned();
+        Box::pin(async move { Err(StorageError::IndexNotFound(index_name)) })
     }
 }
 
