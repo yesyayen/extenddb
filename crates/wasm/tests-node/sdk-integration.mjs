@@ -18,6 +18,8 @@ import {
   GetItemCommand,
   QueryCommand,
   DeleteItemCommand,
+  BatchWriteItemCommand,
+  BatchGetItemCommand,
   ConditionalCheckFailedException,
 } from "@aws-sdk/client-dynamodb";
 
@@ -109,6 +111,47 @@ try {
 }
 assert.ok(threw, "conditional PutItem should have thrown");
 
+// Batch: one BatchWriteItem (two puts, one delete) then one BatchGetItem over
+// the written keys plus the deleted one, through the real SDK marshalling.
+const bw = await client.send(
+  new BatchWriteItemCommand({
+    RequestItems: {
+      Movies: [
+        { PutRequest: { Item: { year: { N: "2014" }, title: { S: "Interstellar" }, rank: { N: "1" } } } },
+        { PutRequest: { Item: { year: { N: "2014" }, title: { S: "Whiplash" }, rank: { N: "2" } } } },
+        { DeleteRequest: { Key: { year: { N: "2013" }, title: { S: "Prisoners" } } } },
+      ],
+    },
+    ReturnConsumedCapacity: "TOTAL",
+  }),
+);
+assert.deepStrictEqual(bw.UnprocessedItems, {}, "BatchWriteItem should leave nothing unprocessed");
+assert.strictEqual(bw.ConsumedCapacity.length, 1, "one ConsumedCapacity entry for the one table");
+assert.strictEqual(bw.ConsumedCapacity[0].TableName, "Movies");
+assert.strictEqual(bw.ConsumedCapacity[0].CapacityUnits, 3, "three write units for three requests");
+
+const bg = await client.send(
+  new BatchGetItemCommand({
+    RequestItems: {
+      Movies: {
+        Keys: [
+          { year: { N: "2014" }, title: { S: "Interstellar" } },
+          { year: { N: "2014" }, title: { S: "Whiplash" } },
+          { year: { N: "2013" }, title: { S: "Prisoners" } },
+        ],
+        ProjectionExpression: "title, #r",
+        ExpressionAttributeNames: { "#r": "rank" },
+      },
+    },
+  }),
+);
+assert.deepStrictEqual(bg.UnprocessedKeys, {}, "BatchGetItem should leave nothing unprocessed");
+const gotTitles = bg.Responses.Movies.map((it) => it.title.S).sort();
+assert.deepStrictEqual(gotTitles, ["Interstellar", "Whiplash"], "the two puts are readable, the deleted key is absent");
+for (const it of bg.Responses.Movies) {
+  assert.deepStrictEqual(Object.keys(it).sort(), ["rank", "title"], "ProjectionExpression applied per item");
+}
+
 console.log(
-  "SDK-v3 integration test PASSED: real @aws-sdk/client-dynamodb (Create/Put/Get/Query + conditional) -> wasm engine, zero network",
+  "SDK-v3 integration test PASSED: real @aws-sdk/client-dynamodb (Create/Put/Get/Query + conditional + BatchWrite/BatchGet) -> wasm engine, zero network",
 );

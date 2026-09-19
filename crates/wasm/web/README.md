@@ -61,7 +61,8 @@ in-tab database, so a write from any one is visible to all and to the data
 browser:
 
 - **CLI** (client): an `aws dynamodb <op> --flags` shell (parsed in JS to the wire call).
-- **JS SDK** (client): the real `@aws-sdk/client-dynamodb` over the requestHandler shim.
+- **JS SDK** (client): the real `@aws-sdk/client-dynamodb` over the requestHandler shim,
+  with sample snippets (`QueryCommand`, `BatchWriteItemCommand`, `BatchGetItemCommand`).
 - **Raw JSON** (client): hand-write `X-Amz-Target` + body.
 - **Vector Workbench** (tool): collapsible form-driven sections, today one
   `Vectors` subsection: a shared table/index context bar, create a table with
@@ -75,7 +76,10 @@ browser:
   attributes as truncating chips with expand/copy.
 
 The seeded `Books` table (30 rows, `Author` + `Title` composite key) is the
-general-purpose non-vector demo table for the client tabs.
+general-purpose non-vector demo table for the client tabs. Every client tab
+carries a `BatchWriteItem` sample (two puts and one delete on `Books`) and a
+`BatchGetItem` sample (three `Books` keys with a `ProjectionExpression`); the
+data browser refreshes after each run, so the batch write is visible at once.
 
 ## Scope
 

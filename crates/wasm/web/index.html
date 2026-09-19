@@ -224,6 +224,8 @@
         <div class="row samples" id="cli-samples-item"></div>
         <label class="samples-label">Data plane &middot; read (query / scan)</label>
         <div class="row samples" id="cli-samples-read"></div>
+        <label class="samples-label">Data plane &middot; batch (write / get)</label>
+        <div class="row samples" id="cli-samples-batch"></div>
         <label for="cli">Command. Edit, then Run (Ctrl/Cmd+Enter)</label>
         <textarea id="cli" data-testid="cli" spellcheck="false"
           placeholder="aws dynamodb query \&#10;  --table-name Books \&#10;  --key-condition-expression &quot;Author = :a&quot; \&#10;  --expression-attribute-values '{&quot;:a&quot;:{&quot;S&quot;:&quot;Ursula K. Le Guin&quot;}}'"></textarea>
@@ -234,6 +236,8 @@
       </div>
 
       <div class="panel" id="panel-sdk" data-testid="panel-sdk" hidden>
+        <label class="samples-label">Samples (click to load, then Run)</label>
+        <div class="row samples" id="sdk-samples"></div>
         <label for="sdk">SDK console: <code>@aws-sdk/client-dynamodb</code>. Edit, then Run (Ctrl/Cmd+Enter)</label>
         <textarea id="sdk" data-testid="sdk" spellcheck="false"></textarea>
         <div class="row">
@@ -590,6 +594,33 @@
     // load time from a real Quotes seed embedding (function-valued sample), so
     // the request is runnable wire format against the seeded 384-d index.
     const BOOKS_KEY = { Author: { S: "Ursula K. Le Guin" }, Title: { S: "A Wizard of Earthsea" } };
+    // Batch samples target the seeded Books table. The write puts two Asimov
+    // titles and deletes a seeded one (distinct keys: one call may not name the
+    // same key twice). The get reads three seeded keys with a projection; Year is
+    // a reserved word, so it goes through ExpressionAttributeNames.
+    const BATCH_WRITE_BODY = {
+      RequestItems: {
+        Books: [
+          { PutRequest: { Item: { Author: { S: "Isaac Asimov" }, Title: { S: "Foundation and Empire" }, Genre: { S: "Science Fiction" }, Year: { N: "1952" }, Pages: { N: "247" } } } },
+          { PutRequest: { Item: { Author: { S: "Isaac Asimov" }, Title: { S: "Second Foundation" }, Genre: { S: "Science Fiction" }, Year: { N: "1953" }, Pages: { N: "256" } } } },
+          { DeleteRequest: { Key: { Author: { S: "Isaac Asimov" }, Title: { S: "I, Robot" } } } },
+        ],
+      },
+      ReturnConsumedCapacity: "TOTAL",
+    };
+    const BATCH_GET_BODY = {
+      RequestItems: {
+        Books: {
+          Keys: [
+            { Author: { S: "Isaac Asimov" }, Title: { S: "Foundation" } },
+            { Author: { S: "Jane Austen" }, Title: { S: "Pride and Prejudice" } },
+            { Author: { S: "Agatha Christie" }, Title: { S: "Murder on the Orient Express" } },
+          ],
+          ProjectionExpression: "Title, Genre, #y",
+          ExpressionAttributeNames: { "#y": "Year" },
+        },
+      },
+    };
     const SAMPLES = {
       Query: { target: P + "Query", body: {
         TableName: "Books", KeyConditionExpression: "Author = :a",
@@ -604,6 +635,8 @@
         UpdateExpression: "SET Rating = :r", ExpressionAttributeValues: { ":r": { N: "5" } }, ReturnValues: "ALL_NEW",
       }},
       Scan: { target: P + "Scan", body: { TableName: "Books", Limit: 5 } },
+      BatchWriteItem: { target: P + "BatchWriteItem", body: BATCH_WRITE_BODY },
+      BatchGetItem: { target: P + "BatchGetItem", body: BATCH_GET_BODY },
       DescribeTable: { target: P + "DescribeTable", body: { TableName: "Books" } },
       SearchVectors: () => ({ target: P + "SearchVectors", body: {
         TableName: "Quotes", IndexName: "vidx",
@@ -620,9 +653,13 @@
     function quotesSearchVector() {
       return (QUOTES_SEED && QUOTES_SEED.items[0] && QUOTES_SEED.items[0].emb) || [];
     }
-    function loadSample(name) {
+    // The boot-time default loads plain; a sample button click also moves the
+    // caret to the start and focuses the body, like the CLI and SDK loaders.
+    function loadSample(name, focus = false) {
       const s = typeof SAMPLES[name] === "function" ? SAMPLES[name]() : SAMPLES[name];
-      targetEl.value = s.target; bodyEl.value = JSON.stringify(s.body, null, 2);
+      targetEl.value = s.target;
+      const text = JSON.stringify(s.body, null, 2);
+      if (focus) loadInto(bodyEl, text); else bodyEl.value = text;
     }
 
     // ---- AWS CLI-style shell --------------------------------------------
@@ -631,7 +668,7 @@
       "Item", "Key", "ExpressionAttributeValues", "ExpressionAttributeNames",
       "AttributeDefinitions", "KeySchema", "ProvisionedThroughput",
       "ExclusiveStartKey", "GlobalSecondaryIndexes", "LocalSecondaryIndexes",
-      "VectorIndexes", "SearchVector",
+      "VectorIndexes", "SearchVector", "RequestItems",
     ]);
     const NUMBER_FLAGS = new Set(["Limit", "TopK"]);
     function tokenize(line) {
@@ -730,23 +767,42 @@
         JSON.stringify(quotesSearchVector().map((n) => ({ N: String(n) }))) +
         "' \\\n  --top-k 5"],
     ];
+    // The JSON value of --request-items spans several lines inside its quotes:
+    // the tokenizer keeps quoted newlines, and JSON.parse ignores them.
+    const CLI_BATCH = [
+      ["batch-write-item", "aws dynamodb batch-write-item \\\n  --request-items '{\n    \"Books\": [\n      {\"PutRequest\": {\"Item\": {\"Author\": {\"S\": \"Isaac Asimov\"}, \"Title\": {\"S\": \"Foundation and Empire\"}, \"Genre\": {\"S\": \"Science Fiction\"}, \"Year\": {\"N\": \"1952\"}, \"Pages\": {\"N\": \"247\"}}}},\n      {\"PutRequest\": {\"Item\": {\"Author\": {\"S\": \"Isaac Asimov\"}, \"Title\": {\"S\": \"Second Foundation\"}, \"Genre\": {\"S\": \"Science Fiction\"}, \"Year\": {\"N\": \"1953\"}, \"Pages\": {\"N\": \"256\"}}}},\n      {\"DeleteRequest\": {\"Key\": {\"Author\": {\"S\": \"Isaac Asimov\"}, \"Title\": {\"S\": \"I, Robot\"}}}}\n    ]\n  }' \\\n  --return-consumed-capacity TOTAL"],
+      ["batch-get-item", "aws dynamodb batch-get-item \\\n  --request-items '{\n    \"Books\": {\n      \"Keys\": [\n        {\"Author\": {\"S\": \"Isaac Asimov\"}, \"Title\": {\"S\": \"Foundation\"}},\n        {\"Author\": {\"S\": \"Jane Austen\"}, \"Title\": {\"S\": \"Pride and Prejudice\"}},\n        {\"Author\": {\"S\": \"Agatha Christie\"}, \"Title\": {\"S\": \"Murder on the Orient Express\"}}\n      ],\n      \"ProjectionExpression\": \"Title, Genre, #y\",\n      \"ExpressionAttributeNames\": {\"#y\": \"Year\"}\n    }\n  }'"],
+    ];
+    // Every sample button carries data-testid="<console>-sample-<label>" so specs
+    // can load a sample the way a user does instead of retyping its content.
+    // Loading a sample into a textarea shows its first line: the caret goes to
+    // the start before focus, so a sample taller than the box is read top-down.
+    function loadInto(el, text) {
+      el.value = text;
+      el.setSelectionRange(0, 0);
+      el.scrollTop = 0;
+      el.focus();
+    }
     function renderCliSamples(el, pairs) {
       for (const [label, cmd] of pairs) {
         const b = document.createElement("button");
         b.textContent = label;
+        b.setAttribute("data-testid", "cli-sample-" + label);
         b.title = typeof cmd === "function" ? "aws dynamodb " + label + " (built from the seeded Quotes data)" : cmd;
-        b.onclick = () => { cliEl.value = typeof cmd === "function" ? cmd() : cmd; cliEl.focus(); };
+        b.onclick = () => loadInto(cliEl, typeof cmd === "function" ? cmd() : cmd);
         el.appendChild(b);
       }
     }
     renderCliSamples(document.getElementById("cli-samples-cp"), CLI_CP);
     renderCliSamples(document.getElementById("cli-samples-item"), CLI_ITEM);
     renderCliSamples(document.getElementById("cli-samples-read"), CLI_READ);
+    renderCliSamples(document.getElementById("cli-samples-batch"), CLI_BATCH);
 
     const buttons = document.getElementById("sample-buttons");
     for (const name of Object.keys(SAMPLES)) {
       const b = document.createElement("button");
-      b.textContent = name; b.onclick = () => loadSample(name);
+      b.textContent = name; b.onclick = () => loadSample(name, true);
+      b.setAttribute("data-testid", "raw-sample-" + name);
       buttons.appendChild(b);
     }
 
@@ -781,19 +837,64 @@
     }
 
     // ---- SDK console ----------------------------------------------------
-    const SDK_EXAMPLE =
+    // Samples are real @aws-sdk/client-dynamodb snippets; `client` and every
+    // command class are in scope. Buttons are labeled by wire operation, like
+    // the Raw JSON samples; the code shows the SDK command class.
+    const SDK_SAMPLES = {
+      Query:
 `const out = await client.send(new QueryCommand({
   TableName: "Books",
   KeyConditionExpression: "Author = :a",
   ExpressionAttributeValues: { ":a": { S: "Ursula K. Le Guin" } },
 }));
-return out.Items;`;
+return out.Items;`,
+      BatchWriteItem:
+`const out = await client.send(new BatchWriteItemCommand({
+  RequestItems: {
+    Books: [
+      { PutRequest: { Item: { Author: { S: "Isaac Asimov" }, Title: { S: "Foundation and Empire" }, Genre: { S: "Science Fiction" }, Year: { N: "1952" }, Pages: { N: "247" } } } },
+      { PutRequest: { Item: { Author: { S: "Isaac Asimov" }, Title: { S: "Second Foundation" }, Genre: { S: "Science Fiction" }, Year: { N: "1953" }, Pages: { N: "256" } } } },
+      { DeleteRequest: { Key: { Author: { S: "Isaac Asimov" }, Title: { S: "I, Robot" } } } },
+    ],
+  },
+  ReturnConsumedCapacity: "TOTAL",
+}));
+return {
+  UnprocessedItems: out.UnprocessedItems,
+  ConsumedCapacity: out.ConsumedCapacity,
+};`,
+      BatchGetItem:
+`const out = await client.send(new BatchGetItemCommand({
+  RequestItems: {
+    Books: {
+      Keys: [
+        { Author: { S: "Isaac Asimov" }, Title: { S: "Foundation" } },
+        { Author: { S: "Jane Austen" }, Title: { S: "Pride and Prejudice" } },
+        { Author: { S: "Agatha Christie" }, Title: { S: "Murder on the Orient Express" } },
+      ],
+      ProjectionExpression: "Title, Genre, #y",
+      ExpressionAttributeNames: { "#y": "Year" },
+    },
+  },
+}));
+return out.Responses.Books;`,
+    };
     let sdkClient = null;
     function initSdkConsole() {
       const S = window.ExtendDBSDK;
       const sdkEl = document.getElementById("sdk");
       const sdkBtn = document.getElementById("sdk-run");
-      if (!S || !S.DynamoDBClient) {
+      const samplesEl = document.getElementById("sdk-samples");
+      const hasSdk = !!(S && S.DynamoDBClient);
+      for (const name of Object.keys(SDK_SAMPLES)) {
+        const b = document.createElement("button");
+        b.textContent = name;
+        b.setAttribute("data-testid", "sdk-sample-" + name);
+        b.disabled = !hasSdk; // the textarea states the reason (bundle not built)
+        b.onclick = () => loadInto(sdkEl, SDK_SAMPLES[name]);
+        samplesEl.appendChild(b);
+      }
+      if (!hasSdk) {
         sdkEl.value = "// SDK bundle not built. Build it, then reload:\n//   cd crates/wasm/web-sdk && npm install && npm run build";
         sdkBtn.disabled = true; return;
       }
@@ -803,7 +904,7 @@ return out.Items;`;
         requestHandler: S.createExtenddbRequestHandler({ dispatch_http }),
         maxAttempts: 1,
       });
-      sdkEl.value = SDK_EXAMPLE;
+      sdkEl.value = SDK_SAMPLES.Query;
       sdkBtn.onclick = runSdk;
       sdkEl.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runSdk(); } });
     }
