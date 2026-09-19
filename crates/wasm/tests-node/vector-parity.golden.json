@@ -552,6 +552,45 @@
   },
   {
     "body": {
+      "UnprocessedItems": {}
+    },
+    "status": 200,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "SearchResults": [
+        {
+          "Item": {
+            "pk": {
+              "S": "e"
+            }
+          },
+          "Score": 0.0
+        },
+        {
+          "Item": {
+            "pk": {
+              "S": "b"
+            }
+          },
+          "Score": 0.20000000715255728
+        }
+      ]
+    },
+    "status": 200,
+    "target": "SearchVectors"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "One or more parameter values were invalid. Invalid size for parameter emb, Expected: 3, Actual: 2 IndexName: vidx"
+    },
+    "status": 400,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
       "TableDescription": {
         "AttributeDefinitions": [
           {

@@ -300,6 +300,73 @@ assert.ok(
   "oversized UpdateItem should be rejected with ValidationException",
 );
 
+// --- Batch: BatchWriteItem then BatchGetItem, the engine fan-out over the
+// single-item storage methods ---
+
+call("CreateTable", {
+  TableName: "Batch",
+  KeySchema: [{ AttributeName: "id", KeyType: "HASH" }],
+  AttributeDefinitions: [{ AttributeName: "id", AttributeType: "S" }],
+  BillingMode: "PAY_PER_REQUEST",
+});
+const bw = call("BatchWriteItem", {
+  RequestItems: {
+    Batch: [
+      { PutRequest: { Item: { id: { S: "one" }, v: { N: "1" } } } },
+      { PutRequest: { Item: { id: { S: "two" }, v: { N: "2" } } } },
+      { PutRequest: { Item: { id: { S: "three" }, v: { N: "3" } } } },
+    ],
+    Pager: [{ PutRequest: { Item: { pk: { S: "q" }, sk: { N: "1" }, v: { N: "9" } } } }],
+  },
+  ReturnConsumedCapacity: "TOTAL",
+});
+assert.deepStrictEqual(bw.UnprocessedItems, {});
+assert.deepStrictEqual(
+  bw.ConsumedCapacity.map((c) => c.TableName).sort(),
+  ["Batch", "Pager"],
+  "one ConsumedCapacity entry per table",
+);
+// Both rows deleted here were put by the batch above, so an empty read-back
+// below can only mean the batch delete removed them.
+call("BatchWriteItem", {
+  RequestItems: {
+    Batch: [{ DeleteRequest: { Key: { id: { S: "two" } } } }],
+    Pager: [{ DeleteRequest: { Key: { pk: { S: "q" }, sk: { N: "1" } } } }],
+  },
+});
+const bg = call("BatchGetItem", {
+  RequestItems: {
+    Batch: {
+      Keys: [{ id: { S: "one" } }, { id: { S: "two" } }, { id: { S: "three" } }],
+      ProjectionExpression: "#i",
+      ExpressionAttributeNames: { "#i": "id" },
+    },
+    Pager: { Keys: [{ pk: { S: "q" }, sk: { N: "1" } }], ConsistentRead: true },
+  },
+});
+assert.deepStrictEqual(bg.UnprocessedKeys, {});
+assert.deepStrictEqual(
+  bg.Responses.Batch.map((i) => i.id.S),
+  ["one", "three"],
+  "the batch delete removed two; absent keys are skipped, not errors",
+);
+assert.strictEqual(bg.Responses.Batch[0].v, undefined, "projection must drop v");
+assert.deepStrictEqual(bg.Responses.Pager, [], "the batch delete removed the Pager row it put");
+const bgTooMany = JSON.parse(
+  dispatch(
+    "DynamoDB_20120810.BatchGetItem",
+    JSON.stringify({
+      RequestItems: {
+        Batch: { Keys: Array.from({ length: 101 }, (_, i) => ({ id: { S: `k${i}` } })) },
+      },
+    }),
+  ),
+);
+assert.ok(
+  String(bgTooMany.__type).includes("ValidationException"),
+  "101 keys must be a ValidationException, got " + JSON.stringify(bgTooMany),
+);
+
 // --- Vector index + SearchVectors (engine path) ---
 
 const vecCreated = call("CreateTable", {
@@ -427,5 +494,5 @@ assert.ok(
 );
 
 console.log(
-  "M2c smoke test PASSED: Create/Describe/List, Put/Get, Update(SET)+Condition, Query(order/begins_with/range), Scan(+Limit/ESK), pagination-resume-after-delete, DeleteItem(ALL_OLD), DeleteTable, vector index + SearchVectors OK",
+  "M2c smoke test PASSED: Create/Describe/List, Put/Get, Update(SET)+Condition, Query(order/begins_with/range), Scan(+Limit/ESK), pagination-resume-after-delete, DeleteItem(ALL_OLD), DeleteTable, BatchWriteItem/BatchGetItem, vector index + SearchVectors OK",
 );

@@ -261,6 +261,50 @@
     }
   },
   { "target": "Scan", "body": { "TableName": "VP_Cosine", "IndexName": "nosuch" } },
+  {
+    "target": "BatchWriteItem",
+    "body": {
+      "RequestItems": {
+        "VP_Cosine": [
+          {
+            "PutRequest": {
+              "Item": {
+                "pk": { "S": "e" },
+                "emb": { "L": [{ "N": "1" }, { "N": "0" }, { "N": "0" }] }
+              }
+            }
+          },
+          { "DeleteRequest": { "Key": { "pk": { "S": "c" } } } }
+        ]
+      }
+    }
+  },
+  {
+    "target": "SearchVectors",
+    "body": {
+      "TableName": "VP_Cosine",
+      "IndexName": "vidx",
+      "SearchVector": [{ "N": "1" }, { "N": "0" }, { "N": "0" }],
+      "TopK": 5
+    }
+  },
+  {
+    "target": "BatchWriteItem",
+    "body": {
+      "RequestItems": {
+        "VP_Cosine": [
+          {
+            "PutRequest": {
+              "Item": {
+                "pk": { "S": "f" },
+                "emb": { "L": [{ "N": "1" }, { "N": "0" }] }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
   { "target": "DeleteTable", "body": { "TableName": "VP_Cosine" } },
   { "target": "DeleteTable", "body": { "TableName": "VP_Scoped" } }
 ]

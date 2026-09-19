@@ -81,10 +81,10 @@ general-purpose non-vector demo table for the client tabs.
 
 POC: core data plane (CreateTable / DescribeTable / ListTables / DeleteTable,
 PutItem / GetItem / UpdateItem / DeleteItem with ConditionExpression, Query,
-Scan) plus vector indexes declared at CreateTable and SearchVectors (exact
-nearest-neighbor scan, COSINE / EUCLIDEAN / DOT_PRODUCT). Transactions, batch,
-streams, backup, TTL/tags, and non-vector secondary indexes are out of scope
-for the POC.
+Scan, BatchGetItem / BatchWriteItem) plus vector indexes declared at
+CreateTable and SearchVectors (exact nearest-neighbor scan, COSINE / EUCLIDEAN /
+DOT_PRODUCT). Transactions, streams, backup, TTL/tags, and non-vector secondary
+indexes are out of scope for the POC.
 
 Notes:
 - `python3 -m http.server` may serve `.wasm` as `application/octet-stream`; the
