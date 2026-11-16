@@ -41,7 +41,22 @@ pattern here in the same commit.
 
 ## Consoles (client tabs)
 
-- Sample buttons sit above the input, under a `samples-label`.
+- Sample buttons sit above the input, under a `samples-label`. Every client
+  console has them, the JS SDK console included.
+- Sample button labels name the operation in the console's own dialect: the
+  kebab command on the CLI (`batch-write-item`), the wire operation on Raw
+  JSON and JS SDK (`BatchWriteItem`). The SDK command class
+  (`BatchWriteItemCommand`) appears only inside the snippet.
+- Every sample button carries `data-testid="<console>-sample-<label>"`
+  (`cli-sample-batch-write-item`, `raw-sample-BatchGetItem`,
+  `sdk-sample-BatchGetItem`), so a spec loads a sample the way a user does.
+- Loading a sample from its button shows its first line (caret at the start,
+  scrolled to the top, then focus), so a sample taller than the box reads
+  top-down. The boot-time default loads without focus.
+- A new sample offered in more than one client tab carries the same request
+  in each; only the dialect changes. The batch samples follow this; the older
+  item and table samples predate the rule and differ per tab. A batch sample
+  never names one key twice in one call.
 - Every console input runs with Ctrl/⌘+Enter, and its label says so.
 - The single run button is `.primary` and labeled `Run`.
 - Sample content is runnable as-is against the seeded data. Samples that

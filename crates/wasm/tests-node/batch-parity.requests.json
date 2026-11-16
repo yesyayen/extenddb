@@ -1,0 +1,787 @@
+[
+  {
+    "target": "CreateTable",
+    "body": {
+      "TableName": "BP_Composite",
+      "KeySchema": [
+        { "AttributeName": "pk", "KeyType": "HASH" },
+        { "AttributeName": "sk", "KeyType": "RANGE" }
+      ],
+      "AttributeDefinitions": [
+        { "AttributeName": "pk", "AttributeType": "S" },
+        { "AttributeName": "sk", "AttributeType": "S" }
+      ],
+      "BillingMode": "PAY_PER_REQUEST"
+    }
+  },
+  {
+    "target": "CreateTable",
+    "body": {
+      "TableName": "BP_Hash",
+      "KeySchema": [{ "AttributeName": "id", "KeyType": "HASH" }],
+      "AttributeDefinitions": [{ "AttributeName": "id", "AttributeType": "S" }],
+      "BillingMode": "PAY_PER_REQUEST"
+    }
+  },
+  {
+    "target": "BatchWriteItem",
+    "body": {
+      "RequestItems": {
+        "BP_Composite": [
+          {
+            "PutRequest": {
+              "Item": {
+                "pk": { "S": "a" },
+                "sk": { "S": "1" },
+                "v": { "N": "1" },
+                "tag": { "S": "alpha" }
+              }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": {
+                "pk": { "S": "a" },
+                "sk": { "S": "2" },
+                "v": { "N": "2" }
+              }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": {
+                "pk": { "S": "b" },
+                "sk": { "S": "1" },
+                "v": { "N": "3" }
+              }
+            }
+          }
+        ],
+        "BP_Hash": [
+          {
+            "PutRequest": {
+              "Item": { "id": { "S": "x" }, "v": { "S": "hello" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": { "id": { "S": "y" }, "v": { "S": "bye" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": {
+                "id": { "S": "z" },
+                "note": { "S": "the quick brown fox" }
+              }
+            }
+          }
+        ]
+      },
+      "ReturnConsumedCapacity": "TOTAL"
+    }
+  },
+  {
+    "target": "BatchWriteItem",
+    "body": {
+      "RequestItems": {
+        "BP_Composite": [
+          {
+            "DeleteRequest": {
+              "Key": { "pk": { "S": "a" }, "sk": { "S": "2" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": {
+                "pk": { "S": "c" },
+                "sk": { "S": "1" },
+                "v": { "N": "4" }
+              }
+            }
+          }
+        ],
+        "BP_Hash": [
+          { "DeleteRequest": { "Key": { "id": { "S": "y" } } } },
+          {
+            "PutRequest": {
+              "Item": { "id": { "S": "x" }, "v": { "S": "hello again" } }
+            }
+          },
+          {
+            "PutRequest": { "Item": { "id": { "S": "w" }, "v": { "S": "w" } } }
+          }
+        ]
+      },
+      "ReturnConsumedCapacity": "INDEXES",
+      "ReturnItemCollectionMetrics": "SIZE"
+    }
+  },
+  {
+    "target": "BatchWriteItem",
+    "body": {
+      "RequestItems": {
+        "BP_Hash": [{ "DeleteRequest": { "Key": { "id": { "S": "nope" } } } }]
+      }
+    }
+  },
+  {
+    "target": "BatchGetItem",
+    "body": {
+      "RequestItems": {
+        "BP_Composite": {
+          "Keys": [
+            { "pk": { "S": "a" }, "sk": { "S": "1" } },
+            { "pk": { "S": "a" }, "sk": { "S": "2" } },
+            { "pk": { "S": "c" }, "sk": { "S": "1" } }
+          ],
+          "ProjectionExpression": "#p, v",
+          "ExpressionAttributeNames": { "#p": "pk" }
+        },
+        "BP_Hash": {
+          "Keys": [
+            { "id": { "S": "x" } },
+            { "id": { "S": "y" } },
+            { "id": { "S": "nope" } },
+            { "id": { "S": "w" } }
+          ],
+          "ConsistentRead": true
+        }
+      },
+      "ReturnConsumedCapacity": "TOTAL"
+    }
+  },
+  {
+    "target": "BatchGetItem",
+    "body": {
+      "RequestItems": { "BP_Hash": { "Keys": [{ "id": { "S": "z" } }] } },
+      "ReturnConsumedCapacity": "INDEXES"
+    }
+  },
+  {
+    "target": "BatchGetItem",
+    "body": {
+      "RequestItems": {
+        "BP_Hash": {
+          "Keys": [{ "id": { "S": "x" } }],
+          "AttributesToGet": ["id"]
+        }
+      }
+    }
+  },
+  {
+    "target": "BatchGetItem",
+    "body": {
+      "RequestItems": {
+        "BP_Composite": {
+          "Keys": [{ "pk": { "S": "zz" }, "sk": { "S": "9" } }]
+        }
+      },
+      "ReturnConsumedCapacity": "TOTAL"
+    }
+  },
+  {
+    "target": "BatchWriteItem",
+    "body": {
+      "RequestItems": {
+        "BP_Hash": [
+          {
+            "PutRequest": {
+              "Item": {
+                "id": { "S": "types" },
+                "s": { "S": "text" },
+                "n": { "N": "1.50" },
+                "b": { "B": "AQID" },
+                "ss": { "SS": ["b", "a"] },
+                "ns": { "NS": ["10", "2", "-3.5"] },
+                "bs": { "BS": ["AQ==", "Ag=="] },
+                "m": {
+                  "M": {
+                    "inner": { "S": "v" },
+                    "list": { "L": [{ "N": "1" }, { "BOOL": false }] }
+                  }
+                },
+                "l": {
+                  "L": [
+                    { "S": "x" },
+                    { "NULL": true },
+                    { "M": { "k": { "N": "0" } } }
+                  ]
+                },
+                "t": { "BOOL": true },
+                "z": { "NULL": true }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "target": "BatchGetItem",
+    "body": {
+      "RequestItems": {
+        "BP_Hash": {
+          "Keys": [{ "id": { "S": "types" } }],
+          "ConsistentRead": true
+        }
+      }
+    }
+  },
+  {
+    "target": "CreateTable",
+    "body": {
+      "TableName": "BP_Typed",
+      "KeySchema": [
+        { "AttributeName": "n", "KeyType": "HASH" },
+        { "AttributeName": "b", "KeyType": "RANGE" }
+      ],
+      "AttributeDefinitions": [
+        { "AttributeName": "n", "AttributeType": "N" },
+        { "AttributeName": "b", "AttributeType": "B" }
+      ],
+      "BillingMode": "PAY_PER_REQUEST"
+    }
+  },
+  {
+    "target": "BatchWriteItem",
+    "body": {
+      "RequestItems": {
+        "BP_Typed": [
+          {
+            "PutRequest": {
+              "Item": {
+                "n": { "N": "7" },
+                "b": { "B": "Ag==" },
+                "v": { "S": "two" }
+              }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": {
+                "n": { "N": "7" },
+                "b": { "B": "AQ==" },
+                "v": { "S": "one" }
+              }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": {
+                "n": { "N": "-7.25" },
+                "b": { "B": "AQ==" },
+                "v": { "S": "neg" }
+              }
+            }
+          }
+        ]
+      },
+      "ReturnConsumedCapacity": "TOTAL"
+    }
+  },
+  {
+    "target": "BatchGetItem",
+    "body": {
+      "RequestItems": {
+        "BP_Typed": {
+          "Keys": [
+            { "n": { "N": "7" }, "b": { "B": "AQ==" } },
+            { "n": { "N": "-7.25" }, "b": { "B": "AQ==" } },
+            { "n": { "N": "7" }, "b": { "B": "Aw==" } }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "target": "Query",
+    "body": {
+      "TableName": "BP_Typed",
+      "KeyConditionExpression": "n = :n",
+      "ExpressionAttributeValues": { ":n": { "N": "7" } }
+    }
+  },
+  {
+    "target": "BatchWriteItem",
+    "body": {
+      "RequestItems": {
+        "BP_Hash": [
+          { "PutRequest": { "Item": { "id": { "S": "k01" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k02" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k03" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k04" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k05" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k06" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k07" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k08" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k09" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k10" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k11" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k12" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k13" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k14" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k15" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k16" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k17" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k18" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k19" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k20" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k21" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k22" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k23" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k24" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k25" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "k26" } } } }
+        ]
+      }
+    }
+  },
+  {
+    "target": "BatchWriteItem",
+    "body": {
+      "RequestItems": {
+        "BP_Composite": [
+          {
+            "PutRequest": {
+              "Item": { "pk": { "S": "m" }, "sk": { "S": "01" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": { "pk": { "S": "m" }, "sk": { "S": "02" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": { "pk": { "S": "m" }, "sk": { "S": "03" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": { "pk": { "S": "m" }, "sk": { "S": "04" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": { "pk": { "S": "m" }, "sk": { "S": "05" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": { "pk": { "S": "m" }, "sk": { "S": "06" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": { "pk": { "S": "m" }, "sk": { "S": "07" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": { "pk": { "S": "m" }, "sk": { "S": "08" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": { "pk": { "S": "m" }, "sk": { "S": "09" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": { "pk": { "S": "m" }, "sk": { "S": "10" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": { "pk": { "S": "m" }, "sk": { "S": "11" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": { "pk": { "S": "m" }, "sk": { "S": "12" } }
+            }
+          },
+          {
+            "PutRequest": {
+              "Item": { "pk": { "S": "m" }, "sk": { "S": "13" } }
+            }
+          }
+        ],
+        "BP_Hash": [
+          { "PutRequest": { "Item": { "id": { "S": "m01" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "m02" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "m03" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "m04" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "m05" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "m06" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "m07" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "m08" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "m09" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "m10" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "m11" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "m12" } } } },
+          { "PutRequest": { "Item": { "id": { "S": "m13" } } } }
+        ]
+      }
+    }
+  },
+  {
+    "target": "BatchGetItem",
+    "body": {
+      "RequestItems": {
+        "BP_Hash": {
+          "Keys": [
+            { "id": { "S": "k001" } },
+            { "id": { "S": "k002" } },
+            { "id": { "S": "k003" } },
+            { "id": { "S": "k004" } },
+            { "id": { "S": "k005" } },
+            { "id": { "S": "k006" } },
+            { "id": { "S": "k007" } },
+            { "id": { "S": "k008" } },
+            { "id": { "S": "k009" } },
+            { "id": { "S": "k010" } },
+            { "id": { "S": "k011" } },
+            { "id": { "S": "k012" } },
+            { "id": { "S": "k013" } },
+            { "id": { "S": "k014" } },
+            { "id": { "S": "k015" } },
+            { "id": { "S": "k016" } },
+            { "id": { "S": "k017" } },
+            { "id": { "S": "k018" } },
+            { "id": { "S": "k019" } },
+            { "id": { "S": "k020" } },
+            { "id": { "S": "k021" } },
+            { "id": { "S": "k022" } },
+            { "id": { "S": "k023" } },
+            { "id": { "S": "k024" } },
+            { "id": { "S": "k025" } },
+            { "id": { "S": "k026" } },
+            { "id": { "S": "k027" } },
+            { "id": { "S": "k028" } },
+            { "id": { "S": "k029" } },
+            { "id": { "S": "k030" } },
+            { "id": { "S": "k031" } },
+            { "id": { "S": "k032" } },
+            { "id": { "S": "k033" } },
+            { "id": { "S": "k034" } },
+            { "id": { "S": "k035" } },
+            { "id": { "S": "k036" } },
+            { "id": { "S": "k037" } },
+            { "id": { "S": "k038" } },
+            { "id": { "S": "k039" } },
+            { "id": { "S": "k040" } },
+            { "id": { "S": "k041" } },
+            { "id": { "S": "k042" } },
+            { "id": { "S": "k043" } },
+            { "id": { "S": "k044" } },
+            { "id": { "S": "k045" } },
+            { "id": { "S": "k046" } },
+            { "id": { "S": "k047" } },
+            { "id": { "S": "k048" } },
+            { "id": { "S": "k049" } },
+            { "id": { "S": "k050" } },
+            { "id": { "S": "k051" } },
+            { "id": { "S": "k052" } },
+            { "id": { "S": "k053" } },
+            { "id": { "S": "k054" } },
+            { "id": { "S": "k055" } },
+            { "id": { "S": "k056" } },
+            { "id": { "S": "k057" } },
+            { "id": { "S": "k058" } },
+            { "id": { "S": "k059" } },
+            { "id": { "S": "k060" } },
+            { "id": { "S": "k061" } },
+            { "id": { "S": "k062" } },
+            { "id": { "S": "k063" } },
+            { "id": { "S": "k064" } },
+            { "id": { "S": "k065" } },
+            { "id": { "S": "k066" } },
+            { "id": { "S": "k067" } },
+            { "id": { "S": "k068" } },
+            { "id": { "S": "k069" } },
+            { "id": { "S": "k070" } },
+            { "id": { "S": "k071" } },
+            { "id": { "S": "k072" } },
+            { "id": { "S": "k073" } },
+            { "id": { "S": "k074" } },
+            { "id": { "S": "k075" } },
+            { "id": { "S": "k076" } },
+            { "id": { "S": "k077" } },
+            { "id": { "S": "k078" } },
+            { "id": { "S": "k079" } },
+            { "id": { "S": "k080" } },
+            { "id": { "S": "k081" } },
+            { "id": { "S": "k082" } },
+            { "id": { "S": "k083" } },
+            { "id": { "S": "k084" } },
+            { "id": { "S": "k085" } },
+            { "id": { "S": "k086" } },
+            { "id": { "S": "k087" } },
+            { "id": { "S": "k088" } },
+            { "id": { "S": "k089" } },
+            { "id": { "S": "k090" } },
+            { "id": { "S": "k091" } },
+            { "id": { "S": "k092" } },
+            { "id": { "S": "k093" } },
+            { "id": { "S": "k094" } },
+            { "id": { "S": "k095" } },
+            { "id": { "S": "k096" } },
+            { "id": { "S": "k097" } },
+            { "id": { "S": "k098" } },
+            { "id": { "S": "k099" } },
+            { "id": { "S": "k100" } },
+            { "id": { "S": "k101" } }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "target": "BatchGetItem",
+    "body": {
+      "RequestItems": {
+        "BP_Hash": {
+          "Keys": [
+            { "id": { "S": "k001" } },
+            { "id": { "S": "k002" } },
+            { "id": { "S": "k003" } },
+            { "id": { "S": "k004" } },
+            { "id": { "S": "k005" } },
+            { "id": { "S": "k006" } },
+            { "id": { "S": "k007" } },
+            { "id": { "S": "k008" } },
+            { "id": { "S": "k009" } },
+            { "id": { "S": "k010" } },
+            { "id": { "S": "k011" } },
+            { "id": { "S": "k012" } },
+            { "id": { "S": "k013" } },
+            { "id": { "S": "k014" } },
+            { "id": { "S": "k015" } },
+            { "id": { "S": "k016" } },
+            { "id": { "S": "k017" } },
+            { "id": { "S": "k018" } },
+            { "id": { "S": "k019" } },
+            { "id": { "S": "k020" } },
+            { "id": { "S": "k021" } },
+            { "id": { "S": "k022" } },
+            { "id": { "S": "k023" } },
+            { "id": { "S": "k024" } },
+            { "id": { "S": "k025" } },
+            { "id": { "S": "k026" } },
+            { "id": { "S": "k027" } },
+            { "id": { "S": "k028" } },
+            { "id": { "S": "k029" } },
+            { "id": { "S": "k030" } },
+            { "id": { "S": "k031" } },
+            { "id": { "S": "k032" } },
+            { "id": { "S": "k033" } },
+            { "id": { "S": "k034" } },
+            { "id": { "S": "k035" } },
+            { "id": { "S": "k036" } },
+            { "id": { "S": "k037" } },
+            { "id": { "S": "k038" } },
+            { "id": { "S": "k039" } },
+            { "id": { "S": "k040" } },
+            { "id": { "S": "k041" } },
+            { "id": { "S": "k042" } },
+            { "id": { "S": "k043" } },
+            { "id": { "S": "k044" } },
+            { "id": { "S": "k045" } },
+            { "id": { "S": "k046" } },
+            { "id": { "S": "k047" } },
+            { "id": { "S": "k048" } },
+            { "id": { "S": "k049" } },
+            { "id": { "S": "k050" } },
+            { "id": { "S": "k051" } }
+          ]
+        },
+        "BP_Composite": {
+          "Keys": [
+            { "pk": { "S": "m" }, "sk": { "S": "001" } },
+            { "pk": { "S": "m" }, "sk": { "S": "002" } },
+            { "pk": { "S": "m" }, "sk": { "S": "003" } },
+            { "pk": { "S": "m" }, "sk": { "S": "004" } },
+            { "pk": { "S": "m" }, "sk": { "S": "005" } },
+            { "pk": { "S": "m" }, "sk": { "S": "006" } },
+            { "pk": { "S": "m" }, "sk": { "S": "007" } },
+            { "pk": { "S": "m" }, "sk": { "S": "008" } },
+            { "pk": { "S": "m" }, "sk": { "S": "009" } },
+            { "pk": { "S": "m" }, "sk": { "S": "010" } },
+            { "pk": { "S": "m" }, "sk": { "S": "011" } },
+            { "pk": { "S": "m" }, "sk": { "S": "012" } },
+            { "pk": { "S": "m" }, "sk": { "S": "013" } },
+            { "pk": { "S": "m" }, "sk": { "S": "014" } },
+            { "pk": { "S": "m" }, "sk": { "S": "015" } },
+            { "pk": { "S": "m" }, "sk": { "S": "016" } },
+            { "pk": { "S": "m" }, "sk": { "S": "017" } },
+            { "pk": { "S": "m" }, "sk": { "S": "018" } },
+            { "pk": { "S": "m" }, "sk": { "S": "019" } },
+            { "pk": { "S": "m" }, "sk": { "S": "020" } },
+            { "pk": { "S": "m" }, "sk": { "S": "021" } },
+            { "pk": { "S": "m" }, "sk": { "S": "022" } },
+            { "pk": { "S": "m" }, "sk": { "S": "023" } },
+            { "pk": { "S": "m" }, "sk": { "S": "024" } },
+            { "pk": { "S": "m" }, "sk": { "S": "025" } },
+            { "pk": { "S": "m" }, "sk": { "S": "026" } },
+            { "pk": { "S": "m" }, "sk": { "S": "027" } },
+            { "pk": { "S": "m" }, "sk": { "S": "028" } },
+            { "pk": { "S": "m" }, "sk": { "S": "029" } },
+            { "pk": { "S": "m" }, "sk": { "S": "030" } },
+            { "pk": { "S": "m" }, "sk": { "S": "031" } },
+            { "pk": { "S": "m" }, "sk": { "S": "032" } },
+            { "pk": { "S": "m" }, "sk": { "S": "033" } },
+            { "pk": { "S": "m" }, "sk": { "S": "034" } },
+            { "pk": { "S": "m" }, "sk": { "S": "035" } },
+            { "pk": { "S": "m" }, "sk": { "S": "036" } },
+            { "pk": { "S": "m" }, "sk": { "S": "037" } },
+            { "pk": { "S": "m" }, "sk": { "S": "038" } },
+            { "pk": { "S": "m" }, "sk": { "S": "039" } },
+            { "pk": { "S": "m" }, "sk": { "S": "040" } },
+            { "pk": { "S": "m" }, "sk": { "S": "041" } },
+            { "pk": { "S": "m" }, "sk": { "S": "042" } },
+            { "pk": { "S": "m" }, "sk": { "S": "043" } },
+            { "pk": { "S": "m" }, "sk": { "S": "044" } },
+            { "pk": { "S": "m" }, "sk": { "S": "045" } },
+            { "pk": { "S": "m" }, "sk": { "S": "046" } },
+            { "pk": { "S": "m" }, "sk": { "S": "047" } },
+            { "pk": { "S": "m" }, "sk": { "S": "048" } },
+            { "pk": { "S": "m" }, "sk": { "S": "049" } },
+            { "pk": { "S": "m" }, "sk": { "S": "050" } }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "target": "BatchGetItem",
+    "body": {
+      "RequestItems": {
+        "BP_Hash": { "Keys": [{ "id": { "S": "x" } }, { "id": { "S": "x" } }] }
+      }
+    }
+  },
+  {
+    "target": "BatchWriteItem",
+    "body": {
+      "RequestItems": {
+        "BP_Composite": [
+          {
+            "PutRequest": {
+              "Item": {
+                "pk": { "S": "a" },
+                "sk": { "S": "1" },
+                "v": { "N": "9" }
+              }
+            }
+          },
+          {
+            "DeleteRequest": {
+              "Key": { "pk": { "S": "a" }, "sk": { "S": "1" } }
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "target": "BatchWriteItem",
+    "body": {
+      "RequestItems": {
+        "BP_Composite": [
+          {
+            "PutRequest": { "Item": { "pk": { "S": "d" }, "v": { "N": "5" } } }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "target": "BatchWriteItem",
+    "body": {
+      "RequestItems": {
+        "BP_Hash": [{ "PutRequest": { "Item": { "id": { "N": "1" } } } }]
+      }
+    }
+  },
+  {
+    "target": "BatchGetItem",
+    "body": {
+      "RequestItems": { "BP_Missing": { "Keys": [{ "id": { "S": "x" } }] } }
+    }
+  },
+  {
+    "target": "BatchWriteItem",
+    "body": {
+      "RequestItems": {
+        "BP_Missing": [{ "PutRequest": { "Item": { "id": { "S": "x" } } } }]
+      }
+    }
+  },
+  { "target": "BatchGetItem", "body": { "RequestItems": {} } },
+  {
+    "target": "BatchWriteItem",
+    "body": { "RequestItems": { "BP_Hash": [{}] } }
+  },
+  { "target": "BatchWriteItem", "body": { "RequestItems": {} } },
+  {
+    "target": "BatchGetItem",
+    "body": { "RequestItems": { "BP_Hash": { "Keys": [] } } }
+  },
+  { "target": "BatchWriteItem", "body": { "RequestItems": { "BP_Hash": [] } } },
+  {
+    "target": "BatchGetItem",
+    "body": {
+      "RequestItems": {
+        "BP_Hash": {
+          "Keys": [{ "id": { "S": "x" } }],
+          "ProjectionExpression": "id",
+          "AttributesToGet": ["id"]
+        }
+      }
+    }
+  },
+  {
+    "target": "GetItem",
+    "body": {
+      "TableName": "BP_Composite",
+      "Key": { "pk": { "S": "a" }, "sk": { "S": "2" } }
+    }
+  },
+  {
+    "target": "GetItem",
+    "body": {
+      "TableName": "BP_Composite",
+      "Key": { "pk": { "S": "c" }, "sk": { "S": "1" } }
+    }
+  },
+  {
+    "target": "GetItem",
+    "body": { "TableName": "BP_Hash", "Key": { "id": { "S": "x" } } }
+  },
+  {
+    "target": "GetItem",
+    "body": { "TableName": "BP_Hash", "Key": { "id": { "S": "y" } } }
+  },
+  {
+    "target": "Query",
+    "body": {
+      "TableName": "BP_Composite",
+      "KeyConditionExpression": "pk = :p",
+      "ExpressionAttributeValues": { ":p": { "S": "a" } }
+    }
+  },
+  {
+    "target": "Query",
+    "body": {
+      "TableName": "BP_Composite",
+      "KeyConditionExpression": "pk = :p",
+      "ExpressionAttributeValues": { ":p": { "S": "c" } }
+    }
+  },
+  { "target": "Scan", "body": { "TableName": "BP_Hash" } },
+  { "target": "DeleteTable", "body": { "TableName": "BP_Composite" } },
+  { "target": "DeleteTable", "body": { "TableName": "BP_Hash" } },
+  { "target": "DeleteTable", "body": { "TableName": "BP_Typed" } }
+]

@@ -31,6 +31,10 @@
         "TableName": "VP_Cosine",
         "TableSizeBytes": 0,
         "TableStatus": "ACTIVE",
+        "TableThroughputModeSummary": {
+          "LastUpdateToPayPerRequestDateTime": 0,
+          "TableThroughputMode": "PAY_PER_REQUEST"
+        },
         "VectorIndexes": [
           {
             "Dimensions": 3,
@@ -85,6 +89,10 @@
         "TableName": "VP_Cosine",
         "TableSizeBytes": 0,
         "TableStatus": "ACTIVE",
+        "TableThroughputModeSummary": {
+          "LastUpdateToPayPerRequestDateTime": 0,
+          "TableThroughputMode": "PAY_PER_REQUEST"
+        },
         "VectorIndexes": [
           {
             "Dimensions": 3,
@@ -385,6 +393,10 @@
         "TableName": "VP_Scoped",
         "TableSizeBytes": 0,
         "TableStatus": "ACTIVE",
+        "TableThroughputModeSummary": {
+          "LastUpdateToPayPerRequestDateTime": 0,
+          "TableThroughputMode": "PAY_PER_REQUEST"
+        },
         "VectorIndexes": [
           {
             "Dimensions": 2,
@@ -500,6 +512,85 @@
   },
   {
     "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "Query operation not supported on this index type."
+    },
+    "status": 400,
+    "target": "Query"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "Consistent reads are not supported on global secondary indexes"
+    },
+    "status": 400,
+    "target": "Query"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "Scan operation not supported on this index type"
+    },
+    "status": 400,
+    "target": "Scan"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "The table does not have the specified index: nosuch"
+    },
+    "status": 400,
+    "target": "Query"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "The table does not have the specified index: nosuch"
+    },
+    "status": 400,
+    "target": "Scan"
+  },
+  {
+    "body": {
+      "UnprocessedItems": {}
+    },
+    "status": 200,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "SearchResults": [
+        {
+          "Item": {
+            "pk": {
+              "S": "e"
+            }
+          },
+          "Score": 0.0
+        },
+        {
+          "Item": {
+            "pk": {
+              "S": "b"
+            }
+          },
+          "Score": 0.20000000715255728
+        }
+      ]
+    },
+    "status": 200,
+    "target": "SearchVectors"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "One or more parameter values were invalid. Invalid size for parameter emb, Expected: 3, Actual: 2 IndexName: vidx"
+    },
+    "status": 400,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
       "TableDescription": {
         "AttributeDefinitions": [
           {
@@ -529,7 +620,11 @@
         "TableId": "MASKED",
         "TableName": "VP_Cosine",
         "TableSizeBytes": 0,
-        "TableStatus": "DELETING"
+        "TableStatus": "DELETING",
+        "TableThroughputModeSummary": {
+          "LastUpdateToPayPerRequestDateTime": 0,
+          "TableThroughputMode": "PAY_PER_REQUEST"
+        }
       }
     },
     "status": 200,
@@ -574,7 +669,11 @@
         "TableId": "MASKED",
         "TableName": "VP_Scoped",
         "TableSizeBytes": 0,
-        "TableStatus": "DELETING"
+        "TableStatus": "DELETING",
+        "TableThroughputModeSummary": {
+          "LastUpdateToPayPerRequestDateTime": 0,
+          "TableThroughputMode": "PAY_PER_REQUEST"
+        }
       }
     },
     "status": 200,

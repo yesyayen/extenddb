@@ -39,6 +39,10 @@ textarea with grouped, bash-formatted sample commands.
   arbitrary-dimension CLI `create-table`, and zero non-same-origin requests).
   Needs `web/vendor` + `web/models` + `web/data/quotes-seed.json` (see
   `tools/README.md`).
+- `batch.spec.mjs`: `BatchWriteItem` and `BatchGetItem` from all three client
+  tabs, loaded from their sample buttons (CLI `--request-items` JSON-decoded,
+  data browser reflects the write with no manual refresh, Raw JSON and JS SDK
+  samples return the same items, zero network). Needs `web/pkg-sdk` built.
 - `size-budget.mjs` (U5): gzipped size budget for the optimized release wasm.
 
 ## What `ui.spec.mjs` asserts
@@ -68,7 +72,7 @@ textarea with grouped, bash-formatted sample commands.
   On hosts whose OS is not officially supported (e.g. Amazon Linux 2),
   Playwright downloads a compatible fallback build automatically; the
   headless shell has been verified to launch and run there.
-- For `sdk.spec.mjs` only: the in-page SDK bundle (`web/pkg-sdk`):
+- For `sdk.spec.mjs` and `batch.spec.mjs`: the in-page SDK bundle (`web/pkg-sdk`):
   ```
   cd crates/wasm/web-sdk && npm install && npm run build
   ```
@@ -83,6 +87,7 @@ node cli.spec.mjs     # U2 CLI-style shell
 node sdk.spec.mjs     # U3 in-page real AWS SDK v3 (needs web/pkg-sdk built)
 node browser.spec.mjs # U4 data browser (table selector + live item grid)
 node share.spec.mjs   # U5 shareable link
+node batch.spec.mjs   # BatchWriteItem + BatchGetItem in the three client tabs (needs web/pkg-sdk built)
 # or all:  npm test
 ```
 
@@ -126,6 +131,34 @@ gzipped; `wasm-opt` does the shrinking). Budget: 2 MB gzipped.
    rendered rows (no unbounded DOM).
 6. The SDK signs every request, yet zero network is observed after the engine
    is ready: it all runs in-tab.
+
+## What `batch.spec.mjs` asserts
+
+Every response check parses the newest log entry's response box as JSON and
+compares exact shapes (`deepStrictEqual`), so the echoed request text can never
+satisfy an assertion.
+
+1. The CLI `batch-write-item` sample loads from its button (caret at the start,
+   scrolled to the top, focused) and runs: the `--request-items` value is
+   JSON-decoded into `RequestItems.Books` (two `PutRequest`, one
+   `DeleteRequest`), the wire target is `BatchWriteItem`, `UnprocessedItems`
+   equals `{}`, and `ConsumedCapacity` equals exactly
+   `[{ TableName: "Books", CapacityUnits: 3 }]`.
+2. The data browser reflects the write with no manual refresh: the two new
+   rows are present, the deleted seeded row (`I, Robot`) is gone, and the count
+   badge reads 31 items (30 + 2 - 1).
+3. The CLI `batch-get-item` sample (three `Books` keys, `ProjectionExpression`
+   with `#y` for the reserved word `Year`) returns exactly three items whose
+   key set is exactly `Genre`, `Title`, `Year`, with the seeded Years per
+   title; the response has exactly `Responses` and `UnprocessedKeys` (no
+   `ConsumedCapacity`, none was requested) and `UnprocessedKeys` equals `{}`.
+4. The Raw JSON `BatchGetItem` and `BatchWriteItem` samples load top-down, their
+   parsed bodies deep-equal the bodies the CLI dialect produced (no drift
+   between dialects), and they run with the same exact results; re-running the
+   write is idempotent (the grid stays at 31).
+5. The JS SDK `BatchWriteItemCommand` and `BatchGetItemCommand` samples load
+   top-down and run through the real bundled SDK with the same exact results.
+6. Zero network after the engine is ready.
 
 ## What `cli.spec.mjs` asserts (U2)
 

@@ -1,0 +1,927 @@
+[
+  {
+    "body": {
+      "TableDescription": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "pk",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "sk",
+            "AttributeType": "S"
+          }
+        ],
+        "BillingModeSummary": {
+          "BillingMode": "PAY_PER_REQUEST",
+          "LastUpdateToPayPerRequestDateTime": 0
+        },
+        "CreationDateTime": 0,
+        "DeletionProtectionEnabled": false,
+        "ItemCount": 0,
+        "KeySchema": [
+          {
+            "AttributeName": "pk",
+            "KeyType": "HASH"
+          },
+          {
+            "AttributeName": "sk",
+            "KeyType": "RANGE"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "NumberOfDecreasesToday": 0,
+          "ReadCapacityUnits": 0,
+          "WriteCapacityUnits": 0
+        },
+        "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/BP_Composite",
+        "TableId": "MASKED",
+        "TableName": "BP_Composite",
+        "TableSizeBytes": 0,
+        "TableStatus": "ACTIVE",
+        "TableThroughputModeSummary": {
+          "LastUpdateToPayPerRequestDateTime": 0,
+          "TableThroughputMode": "PAY_PER_REQUEST"
+        }
+      }
+    },
+    "status": 200,
+    "target": "CreateTable"
+  },
+  {
+    "body": {
+      "TableDescription": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "id",
+            "AttributeType": "S"
+          }
+        ],
+        "BillingModeSummary": {
+          "BillingMode": "PAY_PER_REQUEST",
+          "LastUpdateToPayPerRequestDateTime": 0
+        },
+        "CreationDateTime": 0,
+        "DeletionProtectionEnabled": false,
+        "ItemCount": 0,
+        "KeySchema": [
+          {
+            "AttributeName": "id",
+            "KeyType": "HASH"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "NumberOfDecreasesToday": 0,
+          "ReadCapacityUnits": 0,
+          "WriteCapacityUnits": 0
+        },
+        "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/BP_Hash",
+        "TableId": "MASKED",
+        "TableName": "BP_Hash",
+        "TableSizeBytes": 0,
+        "TableStatus": "ACTIVE",
+        "TableThroughputModeSummary": {
+          "LastUpdateToPayPerRequestDateTime": 0,
+          "TableThroughputMode": "PAY_PER_REQUEST"
+        }
+      }
+    },
+    "status": 200,
+    "target": "CreateTable"
+  },
+  {
+    "body": {
+      "ConsumedCapacity": [
+        {
+          "CapacityUnits": 3.0,
+          "TableName": "BP_Composite"
+        },
+        {
+          "CapacityUnits": 3.0,
+          "TableName": "BP_Hash"
+        }
+      ],
+      "UnprocessedItems": {}
+    },
+    "status": 200,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "ConsumedCapacity": [
+        {
+          "CapacityUnits": 2.0,
+          "Table": {
+            "CapacityUnits": 2.0
+          },
+          "TableName": "BP_Composite"
+        },
+        {
+          "CapacityUnits": 3.0,
+          "Table": {
+            "CapacityUnits": 3.0
+          },
+          "TableName": "BP_Hash"
+        }
+      ],
+      "UnprocessedItems": {}
+    },
+    "status": 200,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "UnprocessedItems": {}
+    },
+    "status": 200,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "ConsumedCapacity": [
+        {
+          "CapacityUnits": 1.0,
+          "TableName": "BP_Composite"
+        },
+        {
+          "CapacityUnits": 2.0,
+          "TableName": "BP_Hash"
+        }
+      ],
+      "Responses": {
+        "BP_Composite": [
+          {
+            "pk": {
+              "S": "a"
+            },
+            "v": {
+              "N": "1"
+            }
+          },
+          {
+            "pk": {
+              "S": "c"
+            },
+            "v": {
+              "N": "4"
+            }
+          }
+        ],
+        "BP_Hash": [
+          {
+            "id": {
+              "S": "x"
+            },
+            "v": {
+              "S": "hello again"
+            }
+          },
+          {
+            "id": {
+              "S": "w"
+            },
+            "v": {
+              "S": "w"
+            }
+          }
+        ]
+      },
+      "UnprocessedKeys": {}
+    },
+    "status": 200,
+    "target": "BatchGetItem"
+  },
+  {
+    "body": {
+      "ConsumedCapacity": [
+        {
+          "CapacityUnits": 0.5,
+          "Table": {
+            "CapacityUnits": 0.5
+          },
+          "TableName": "BP_Hash"
+        }
+      ],
+      "Responses": {
+        "BP_Hash": [
+          {
+            "id": {
+              "S": "z"
+            },
+            "note": {
+              "S": "the quick brown fox"
+            }
+          }
+        ]
+      },
+      "UnprocessedKeys": {}
+    },
+    "status": 200,
+    "target": "BatchGetItem"
+  },
+  {
+    "body": {
+      "Responses": {
+        "BP_Hash": [
+          {
+            "id": {
+              "S": "x"
+            }
+          }
+        ]
+      },
+      "UnprocessedKeys": {}
+    },
+    "status": 200,
+    "target": "BatchGetItem"
+  },
+  {
+    "body": {
+      "ConsumedCapacity": [],
+      "Responses": {
+        "BP_Composite": []
+      },
+      "UnprocessedKeys": {}
+    },
+    "status": 200,
+    "target": "BatchGetItem"
+  },
+  {
+    "body": {
+      "UnprocessedItems": {}
+    },
+    "status": 200,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "Responses": {
+        "BP_Hash": [
+          {
+            "b": {
+              "B": "AQID"
+            },
+            "bs": {
+              "BS": [
+                "AQ==",
+                "Ag=="
+              ]
+            },
+            "id": {
+              "S": "types"
+            },
+            "l": {
+              "L": [
+                {
+                  "S": "x"
+                },
+                {
+                  "NULL": true
+                },
+                {
+                  "M": {
+                    "k": {
+                      "N": "0"
+                    }
+                  }
+                }
+              ]
+            },
+            "m": {
+              "M": {
+                "inner": {
+                  "S": "v"
+                },
+                "list": {
+                  "L": [
+                    {
+                      "N": "1"
+                    },
+                    {
+                      "BOOL": false
+                    }
+                  ]
+                }
+              }
+            },
+            "n": {
+              "N": "1.5"
+            },
+            "ns": {
+              "NS": [
+                "-3.5",
+                "10",
+                "2"
+              ]
+            },
+            "s": {
+              "S": "text"
+            },
+            "ss": {
+              "SS": [
+                "a",
+                "b"
+              ]
+            },
+            "t": {
+              "BOOL": true
+            },
+            "z": {
+              "NULL": true
+            }
+          }
+        ]
+      },
+      "UnprocessedKeys": {}
+    },
+    "status": 200,
+    "target": "BatchGetItem"
+  },
+  {
+    "body": {
+      "TableDescription": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "n",
+            "AttributeType": "N"
+          },
+          {
+            "AttributeName": "b",
+            "AttributeType": "B"
+          }
+        ],
+        "BillingModeSummary": {
+          "BillingMode": "PAY_PER_REQUEST",
+          "LastUpdateToPayPerRequestDateTime": 0
+        },
+        "CreationDateTime": 0,
+        "DeletionProtectionEnabled": false,
+        "ItemCount": 0,
+        "KeySchema": [
+          {
+            "AttributeName": "n",
+            "KeyType": "HASH"
+          },
+          {
+            "AttributeName": "b",
+            "KeyType": "RANGE"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "NumberOfDecreasesToday": 0,
+          "ReadCapacityUnits": 0,
+          "WriteCapacityUnits": 0
+        },
+        "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/BP_Typed",
+        "TableId": "MASKED",
+        "TableName": "BP_Typed",
+        "TableSizeBytes": 0,
+        "TableStatus": "ACTIVE",
+        "TableThroughputModeSummary": {
+          "LastUpdateToPayPerRequestDateTime": 0,
+          "TableThroughputMode": "PAY_PER_REQUEST"
+        }
+      }
+    },
+    "status": 200,
+    "target": "CreateTable"
+  },
+  {
+    "body": {
+      "ConsumedCapacity": [
+        {
+          "CapacityUnits": 3.0,
+          "TableName": "BP_Typed"
+        }
+      ],
+      "UnprocessedItems": {}
+    },
+    "status": 200,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "Responses": {
+        "BP_Typed": [
+          {
+            "b": {
+              "B": "AQ=="
+            },
+            "n": {
+              "N": "7"
+            },
+            "v": {
+              "S": "one"
+            }
+          },
+          {
+            "b": {
+              "B": "AQ=="
+            },
+            "n": {
+              "N": "-7.25"
+            },
+            "v": {
+              "S": "neg"
+            }
+          }
+        ]
+      },
+      "UnprocessedKeys": {}
+    },
+    "status": 200,
+    "target": "BatchGetItem"
+  },
+  {
+    "body": {
+      "Count": 2,
+      "Items": [
+        {
+          "b": {
+            "B": "AQ=="
+          },
+          "n": {
+            "N": "7"
+          },
+          "v": {
+            "S": "one"
+          }
+        },
+        {
+          "b": {
+            "B": "Ag=="
+          },
+          "n": {
+            "N": "7"
+          },
+          "v": {
+            "S": "two"
+          }
+        }
+      ],
+      "ScannedCount": 2
+    },
+    "status": 200,
+    "target": "Query"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "1 validation error detected: Value '{BP_Hash=[WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest, WriteRequest]}' at 'requestItems' failed to satisfy constraint: Map value must satisfy constraint: [Member must have length less than or equal to 25, Member must have length greater than or equal to 1]"
+    },
+    "status": 400,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "Too many items requested for the BatchWriteItem call"
+    },
+    "status": 400,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "1 validation error detected: Value at 'RequestItems.BP_Hash.member.Keys' failed to satisfy constraint: Member must have length less than or equal to 100"
+    },
+    "status": 400,
+    "target": "BatchGetItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "Too many items requested for the BatchGetItem call"
+    },
+    "status": 400,
+    "target": "BatchGetItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "Provided list of item keys contains duplicates"
+    },
+    "status": 400,
+    "target": "BatchGetItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "Provided list of item keys contains duplicates"
+    },
+    "status": 400,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "One or more parameter values were invalid: Missing the key sk in the item"
+    },
+    "status": 400,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "The provided key element does not match the schema"
+    },
+    "status": 400,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+      "message": "Requested resource not found"
+    },
+    "status": 400,
+    "target": "BatchGetItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+      "message": "Requested resource not found"
+    },
+    "status": 400,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "1 validation error detected: Value at 'RequestItems' failed to satisfy constraint: Member must have length greater than or equal to 1"
+    },
+    "status": 400,
+    "target": "BatchGetItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "Supplied AttributeValue is empty, must contain exactly one of the supported datatypes"
+    },
+    "status": 400,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "The requestItems parameter is required for BatchWriteItem"
+    },
+    "status": 400,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "1 validation error detected: Value '[]' at 'requestItems.BP_Hash.member.keys' failed to satisfy constraint: Member must have length greater than or equal to 1"
+    },
+    "status": 400,
+    "target": "BatchGetItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "1 validation error detected: Value '[]' at 'requestItems.BP_Hash.member' failed to satisfy constraint: Member must have length greater than or equal to 1"
+    },
+    "status": 400,
+    "target": "BatchWriteItem"
+  },
+  {
+    "body": {
+      "__type": "com.amazon.coral.validate#ValidationException",
+      "message": "Can not use both expression and non-expression parameters in the same request: Non-expression parameters: {AttributesToGet} Expression parameters: {ProjectionExpression}"
+    },
+    "status": 400,
+    "target": "BatchGetItem"
+  },
+  {
+    "body": {},
+    "status": 200,
+    "target": "GetItem"
+  },
+  {
+    "body": {
+      "Item": {
+        "pk": {
+          "S": "c"
+        },
+        "sk": {
+          "S": "1"
+        },
+        "v": {
+          "N": "4"
+        }
+      }
+    },
+    "status": 200,
+    "target": "GetItem"
+  },
+  {
+    "body": {
+      "Item": {
+        "id": {
+          "S": "x"
+        },
+        "v": {
+          "S": "hello again"
+        }
+      }
+    },
+    "status": 200,
+    "target": "GetItem"
+  },
+  {
+    "body": {},
+    "status": 200,
+    "target": "GetItem"
+  },
+  {
+    "body": {
+      "Count": 1,
+      "Items": [
+        {
+          "pk": {
+            "S": "a"
+          },
+          "sk": {
+            "S": "1"
+          },
+          "tag": {
+            "S": "alpha"
+          },
+          "v": {
+            "N": "1"
+          }
+        }
+      ],
+      "ScannedCount": 1
+    },
+    "status": 200,
+    "target": "Query"
+  },
+  {
+    "body": {
+      "Count": 1,
+      "Items": [
+        {
+          "pk": {
+            "S": "c"
+          },
+          "sk": {
+            "S": "1"
+          },
+          "v": {
+            "N": "4"
+          }
+        }
+      ],
+      "ScannedCount": 1
+    },
+    "status": 200,
+    "target": "Query"
+  },
+  {
+    "body": {
+      "Count": 4,
+      "Items": [
+        {
+          "b": {
+            "B": "AQID"
+          },
+          "bs": {
+            "BS": [
+              "AQ==",
+              "Ag=="
+            ]
+          },
+          "id": {
+            "S": "types"
+          },
+          "l": {
+            "L": [
+              {
+                "S": "x"
+              },
+              {
+                "NULL": true
+              },
+              {
+                "M": {
+                  "k": {
+                    "N": "0"
+                  }
+                }
+              }
+            ]
+          },
+          "m": {
+            "M": {
+              "inner": {
+                "S": "v"
+              },
+              "list": {
+                "L": [
+                  {
+                    "N": "1"
+                  },
+                  {
+                    "BOOL": false
+                  }
+                ]
+              }
+            }
+          },
+          "n": {
+            "N": "1.5"
+          },
+          "ns": {
+            "NS": [
+              "-3.5",
+              "10",
+              "2"
+            ]
+          },
+          "s": {
+            "S": "text"
+          },
+          "ss": {
+            "SS": [
+              "a",
+              "b"
+            ]
+          },
+          "t": {
+            "BOOL": true
+          },
+          "z": {
+            "NULL": true
+          }
+        },
+        {
+          "id": {
+            "S": "w"
+          },
+          "v": {
+            "S": "w"
+          }
+        },
+        {
+          "id": {
+            "S": "x"
+          },
+          "v": {
+            "S": "hello again"
+          }
+        },
+        {
+          "id": {
+            "S": "z"
+          },
+          "note": {
+            "S": "the quick brown fox"
+          }
+        }
+      ],
+      "ScannedCount": 4
+    },
+    "status": 200,
+    "target": "Scan"
+  },
+  {
+    "body": {
+      "TableDescription": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "pk",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "sk",
+            "AttributeType": "S"
+          }
+        ],
+        "BillingModeSummary": {
+          "BillingMode": "PAY_PER_REQUEST",
+          "LastUpdateToPayPerRequestDateTime": 0
+        },
+        "CreationDateTime": 0,
+        "DeletionProtectionEnabled": false,
+        "ItemCount": 0,
+        "KeySchema": [
+          {
+            "AttributeName": "pk",
+            "KeyType": "HASH"
+          },
+          {
+            "AttributeName": "sk",
+            "KeyType": "RANGE"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "NumberOfDecreasesToday": 0,
+          "ReadCapacityUnits": 0,
+          "WriteCapacityUnits": 0
+        },
+        "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/BP_Composite",
+        "TableId": "MASKED",
+        "TableName": "BP_Composite",
+        "TableSizeBytes": 0,
+        "TableStatus": "DELETING",
+        "TableThroughputModeSummary": {
+          "LastUpdateToPayPerRequestDateTime": 0,
+          "TableThroughputMode": "PAY_PER_REQUEST"
+        }
+      }
+    },
+    "status": 200,
+    "target": "DeleteTable"
+  },
+  {
+    "body": {
+      "TableDescription": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "id",
+            "AttributeType": "S"
+          }
+        ],
+        "BillingModeSummary": {
+          "BillingMode": "PAY_PER_REQUEST",
+          "LastUpdateToPayPerRequestDateTime": 0
+        },
+        "CreationDateTime": 0,
+        "DeletionProtectionEnabled": false,
+        "ItemCount": 0,
+        "KeySchema": [
+          {
+            "AttributeName": "id",
+            "KeyType": "HASH"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "NumberOfDecreasesToday": 0,
+          "ReadCapacityUnits": 0,
+          "WriteCapacityUnits": 0
+        },
+        "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/BP_Hash",
+        "TableId": "MASKED",
+        "TableName": "BP_Hash",
+        "TableSizeBytes": 0,
+        "TableStatus": "DELETING",
+        "TableThroughputModeSummary": {
+          "LastUpdateToPayPerRequestDateTime": 0,
+          "TableThroughputMode": "PAY_PER_REQUEST"
+        }
+      }
+    },
+    "status": 200,
+    "target": "DeleteTable"
+  },
+  {
+    "body": {
+      "TableDescription": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "n",
+            "AttributeType": "N"
+          },
+          {
+            "AttributeName": "b",
+            "AttributeType": "B"
+          }
+        ],
+        "BillingModeSummary": {
+          "BillingMode": "PAY_PER_REQUEST",
+          "LastUpdateToPayPerRequestDateTime": 0
+        },
+        "CreationDateTime": 0,
+        "DeletionProtectionEnabled": false,
+        "ItemCount": 0,
+        "KeySchema": [
+          {
+            "AttributeName": "n",
+            "KeyType": "HASH"
+          },
+          {
+            "AttributeName": "b",
+            "KeyType": "RANGE"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "NumberOfDecreasesToday": 0,
+          "ReadCapacityUnits": 0,
+          "WriteCapacityUnits": 0
+        },
+        "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/BP_Typed",
+        "TableId": "MASKED",
+        "TableName": "BP_Typed",
+        "TableSizeBytes": 0,
+        "TableStatus": "DELETING",
+        "TableThroughputModeSummary": {
+          "LastUpdateToPayPerRequestDateTime": 0,
+          "TableThroughputMode": "PAY_PER_REQUEST"
+        }
+      }
+    },
+    "status": 200,
+    "target": "DeleteTable"
+  }
+]

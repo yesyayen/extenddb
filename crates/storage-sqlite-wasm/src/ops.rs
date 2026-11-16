@@ -873,6 +873,7 @@ fn build_table_description(
             last_decrease_date_time: None,
         },
         billing_mode_summary,
+        table_throughput_mode_summary: None,
         global_secondary_indexes: None,
         local_secondary_indexes: None,
         stream_specification: None,
